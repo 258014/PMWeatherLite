@@ -34,3 +34,6 @@ Desktop.ini
 # ---- 其它 ----
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
+
+# 图标源文件与中间产物（只提交派生出的 logo / cover）
+icon_src/

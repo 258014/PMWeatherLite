@@ -1,11 +1,12 @@
 modLoader="javafml"
 loaderVersion="[47,)"
-license="ARR - independent reimplementation, see README"
+license="All Rights Reserved - see the LICENSE file in the repository"
 
 [[mods]]
 modId="pmwlite"
 version="${file.jarVersion}"
 displayName="PMWeather Lite (Stellar Reimplementation)"
+logoFile="pmwlite_logo.png"
 credits="Algorithm reference: ProtoManly's Weather by ProtoManly (ARR). Reimplemented independently."
 authors="stellar"
 description='''

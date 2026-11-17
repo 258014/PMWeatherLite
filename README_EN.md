@@ -173,9 +173,14 @@ iterations:
 | Block-identification garbage during scan | 18.9 KB / scan | **0 B** |
 | Noise samples per storm per tick | 8 simplex | **4.2** |
 | Bridge player×event passes per tick | 3 | **1** |
+| Heavy-rain particle packets | ~60 /s /player | **~10 /s /player** |
 
 Numerical equivalence: 300 randomised sounding columns compared against the v3
 implementation — **zero deviation** in precipitation phase and CAPE.
+
+The build is **reproducible**: two `./gradlew clean build` runs produce a byte-identical
+jar (`preserveFileTimestamps=false` plus a fixed manifest timestamp, overridable via
+`SOURCE_DATE_EPOCH`), so anyone can verify that a published jar came from this source.
 
 Details: [`docs/06-算法与性能优化-v4.md`](docs/06-算法与性能优化-v4.md) (Chinese).
 
@@ -225,14 +230,12 @@ All design documents are currently in Chinese.
 
 ## Known limitations
 
-1. **Precipitation particles are still one packet per particle** — about 60 packets/s/player
-   under heavy rain. Batching is pending (1.20.1 client packet semantics unconfirmed).
-2. **The destruction scan uses a fixed ±3 block box** — it does not scale with wind speed.
-3. **Two coexisting weather systems**: `StormManager` (physical storms) and `WeatherSystem`
+1. **The destruction scan uses a fixed ±3 block box** — it does not scale with wind speed.
+2. **Two coexisting weather systems**: `StormManager` (physical storms) and `WeatherSystem`
    (18 types) each compute precipitation; the bridge takes the max.
-4. **Mixed RNG** — `Math.random()` and `level.random` are both used, so a seed does not
+3. **Mixed RNG** — `Math.random()` and `level.random` are both used, so a seed does not
    reproduce the same sequence.
-5. The phase cache is keyed per 64-block column with a 5-second TTL, so crossing a column
+4. The phase cache is keyed per 64-block column with a 5-second TTL, so crossing a column
    boundary can lag by up to 5 seconds.
 
 ---

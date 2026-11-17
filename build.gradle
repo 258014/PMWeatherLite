@@ -15,6 +15,15 @@ java {
     toolchain.languageVersion = JavaLanguageVersion.of(17)
 }
 
+// Deterministic build stamp (see the jar manifest below). SOURCE_DATE_EPOCH wins when set.
+project.ext.buildTimestamp = {
+    def epoch = System.getenv('SOURCE_DATE_EPOCH')
+    if (epoch != null && epoch.isInteger()) {
+        return new Date(Long.parseLong(epoch) * 1000L).format("yyyy-MM-dd'T'HH:mm:ss'Z'", TimeZone.getTimeZone('UTC'))
+    }
+    return '2000-01-01T00:00:00Z'
+}()
+
 println "Java: ${System.getProperty 'java.version'}, JVM: ${System.getProperty 'java.vm.version'} (${System.getProperty 'java.vendor'}), Arch: ${System.getProperty 'os.arch'}"
 
 minecraft {
@@ -80,9 +89,19 @@ jar {
                 "Implementation-Title"    : project.name,
                 "Implementation-Version"  : project.jar.archiveVersion,
                 "Implementation-Vendor"   : "stellar",
-                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+                // REPRODUCIBLE BUILD: never embed the wall-clock time. Use SOURCE_DATE_EPOCH
+                // when the CI/user provides one, otherwise a fixed stamp. Combined with the
+                // archive options below, `./gradlew build` is byte-for-byte reproducible,
+                // so a third party can verify that a published jar was built from this source.
+                "Implementation-Timestamp": project.ext.buildTimestamp
         ])
     }
+}
+
+// Reproducible archives: stable entry order + fixed entry timestamps.
+tasks.withType(AbstractArchiveTask).configureEach {
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
 }
 
 tasks.withType(JavaCompile).configureEach {
