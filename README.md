@@ -1,5 +1,7 @@
 # PMWeatherLite
 
+[English](README_EN.md) | **简体中文**
+
 > Minecraft **Forge 1.20.1** 的极端天气模拟 mod —— 把「天气模拟」和「天气渲染」拆开：
 > 模拟留在服务端，云和闪电交给光影包（Oculus / Iris）自己画。
 
@@ -220,4 +222,4 @@ src/main/java/com/stellar/pmwlite/
 
 ## License
 
-ARR (All Rights Reserved). See the notice above.
+ARR (All Rights Reserved). 完整条款见 [LICENSE](LICENSE)。

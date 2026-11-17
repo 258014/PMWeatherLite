@@ -1,0 +1,74 @@
+PMWeatherLite License
+=====================
+
+Copyright (c) 2026 stellar (GitHub: @258014)
+All Rights Reserved.
+
+This project is released under an "All Rights Reserved" (ARR) license, matching the
+licensing model of the upstream project it draws its algorithm concepts from.
+
+
+1. WHAT YOU MAY DO
+------------------
+
+a) Play with it. Download the compiled jar and use it in single-player or on your own
+   server, for any number of players, free of charge.
+
+b) Include the UNMODIFIED jar in a modpack, public or private, as long as you credit
+   this project and link back to its repository.
+
+c) Fork and modify it for PRIVATE use only (your own world / your own server).
+
+d) Read the source code for learning purposes.
+
+
+2. WHAT YOU MAY NOT DO
+----------------------
+
+a) Redistribute the source code, or any modified/binary derivative of it, without
+   prior written permission from the copyright holder.
+
+b) Reupload the jar to another download site, or bundle it with paid content,
+   without prior written permission.
+
+c) Use the code, in whole or in part, in another public mod or commercial product.
+
+d) Remove or alter this license notice or the copyright headers.
+
+e) Claim authorship of the original implementation.
+
+
+3. THIRD-PARTY NOTICE
+---------------------
+
+The atmospheric model, parameter ranges and storm life-cycle structure are inspired by
+"ProtoManly's Weather" (PMWeather) by ProtoManly, which is itself distributed under an
+All Rights Reserved license.
+
+This project is an INDEPENDENT REIMPLEMENTATION for Minecraft Forge 1.20.1. It contains
+none of the upstream project's source code, shaders, textures or audio assets. All audio
+cues reuse vanilla Minecraft `SoundEvent`s; no custom .ogg files are shipped.
+
+The physics used here (Magnus saturation vapour pressure, Bolton virtual temperature,
+CAPE/CINH integration, Rankine vortex) is public-domain meteorology.
+
+Minecraft is a trademark of Mojang Studios. This project is not affiliated with or
+endorsed by Mojang Studios or by the PMWeather author.
+
+
+4. NO WARRANTY
+--------------
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+5. PERMISSIONS
+--------------
+
+For any use not covered above, open an issue on the repository to request permission.
+Permission is granted case by case, in writing.
