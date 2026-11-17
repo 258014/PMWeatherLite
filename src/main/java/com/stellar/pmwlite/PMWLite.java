@@ -117,6 +117,7 @@ public class PMWLite {
         FixedAssetManager.clear(sl);
         ForecastEngine.clear(sl);
         FortificationManager.clear(sl);
+        com.stellar.pmwlite.atmos.AtmosphereManager.clear(sl);
     }
 
     /** Clear per-player sound state on logout (bounded memory). */
@@ -141,9 +142,19 @@ public class PMWLite {
             destroyHandler.tick(level, manager);
             weatherBridge.tick(level, manager, weather);
             tornadoFX.tick(level, manager);
-            precipitation.tick(level, manager, weather);
+            precipitation.tick(level, manager, weather, config);
             wildfire.tick(level, manager);
             alertManager.tick(level, manager);
+            com.stellar.pmwlite.atmos.AtmosphereManager.of(level, config).tick(manager, weather);
+        }
+
+        // 大气探针 1 Hz 推送（HUD 与雷达信息栏共用；doAtmosphere 关闭时不发，避免无意义流量）
+        if (config.doAtmosphere && server.getTickCount() % 20 == 0) {
+            for (ServerLevel level : server.getAllLevels()) {
+                for (ServerPlayer player : level.players()) {
+                    RadarService.sendProbe(player);
+                }
+            }
         }
     }
 
@@ -353,6 +364,76 @@ public class PMWLite {
                     ctx.getSource().sendSuccess(() -> Component.literal(text), false);
                     return 1;
                 }))
+                .then(net.minecraft.commands.Commands.literal("atmos").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    if (src == null) {
+                        ctx.getSource().sendFailure(Component.literal("§c[PMWLite] 该命令只能由玩家执行。"));
+                        return 0;
+                    }
+                    ServerLevel level = src.serverLevel();
+                    var am = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, config);
+                    var probe = new com.stellar.pmwlite.atmos.AtmosphereGrid.Probe();
+                    Vec3 eye = src.position().add(0, src.getEyeHeight(), 0);
+                    if (!am.probe(eye, probe)) {
+                        ctx.getSource().sendFailure(Component.literal(
+                                "§c[PMWLite] 本地大气网格尚未就绪（或 doAtmosphere 已关闭）"));
+                        return 0;
+                    }
+                    StringBuilder sb = new StringBuilder("§6[PMWLite] 本地大气 @ ")
+                            .append((int) eye.x).append(", ").append((int) eye.y).append(", ")
+                            .append((int) eye.z).append("§r\n");
+                    sb.append(String.format("§7气压 §f%.2f hPa   §7气温 §f%.2f ℃   §7露点 §f%.2f ℃%n",
+                            probe.pressureHpa, probe.tempC, probe.dewPointC));
+                    sb.append(String.format("§7相对湿度 §f%.0f%%   §7比湿 §f%.2f g/kg%n",
+                            probe.humidity * 100f,
+                            com.stellar.pmwlite.atmos.ApparentTemperature.saturationMixingRatio(
+                                    probe.tempC, probe.pressureHpa) * probe.humidity));
+                    sb.append(String.format("§7氧气 §f%.2f%%   §7云量 §f%.0f%%   §7云底 §f%.0f m%n",
+                            probe.oxygen * 100f, probe.cloud * 100f, probe.cloudBaseM));
+                    sb.append(String.format("§7风 §f%.2f m/s §7(u %.2f / v %.2f / w %.2f)   体感 §f%.2f ℃%n",
+                            probe.windSpeed, probe.windX, probe.windZ, probe.windY, probe.apparentC));
+                    sb.append("§7位置: ").append(probe.underground ? "§c地下/室内" : "§a露天");
+                    String text = sb.toString();
+                    ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("global").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    BlockPos at = src != null ? src.blockPosition()
+                            : BlockPos.containing(ctx.getSource().getPosition());
+                    ServerLevel level = ctx.getSource().getLevel();
+                    var gm = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, config).global();
+                    if (!gm.ready()) {
+                        ctx.getSource().sendFailure(Component.literal("§c[PMWLite] 全球大气模型尚未就绪。"));
+                        return 0;
+                    }
+                    StringBuilder sb = new StringBuilder("§6[PMWLite] 八层大气剖面 @ ")
+                            .append(at.getX()).append(", ").append(at.getZ()).append("§r\n");
+                    sb.append("§8层            高度      气压      温度    云量     风§r\n");
+                    for (int l = 0; l < com.stellar.pmwlite.atmos.GlobalModel.LAYERS; l++) {
+                        int i = gm.indexAt(at.getX(), at.getZ(), l);
+                        if (i < 0) break;
+                        float wu = gm.windUAt(at.getX(), at.getZ(), l);
+                        float wv = gm.windVAt(at.getX(), at.getZ(), l);
+                        sb.append(String.format("§7%-12s §f%6.0f m  §f%7.1f hPa  §f%6.1f ℃  §f%4.0f%%  §f%5.1f m/s%n",
+                                com.stellar.pmwlite.atmos.GlobalModel.LAYER_NAMES[l],
+                                com.stellar.pmwlite.atmos.GlobalModel.HEIGHTS[l],
+                                gm.pressureAt(at.getX(), at.getZ(), l),
+                                gm.temperatureAt(at.getX(), at.getZ(), l),
+                                gm.cloudAt(at.getX(), at.getZ(), l) * 100f,
+                                Math.sqrt(wu * wu + wv * wv)));
+                    }
+                    String text = sb.toString();
+                    ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("atmoscheck")
+                        .executes(ctx -> runAtmosCheck(ctx.getSource(), 24))
+                        .then(net.minecraft.commands.Commands.argument("steps",
+                                com.mojang.brigadier.arguments.IntegerArgumentType.integer(4, 240))
+                                .executes(ctx -> runAtmosCheck(ctx.getSource(),
+                                        com.mojang.brigadier.arguments.IntegerArgumentType
+                                                .getInteger(ctx, "steps")))))
                 .then(net.minecraft.commands.Commands.literal("hint").executes(ctx -> {
                     var src = ctx.getSource().getPlayer();
                     if (src == null) return 0;
@@ -362,5 +443,42 @@ public class PMWLite {
                     src.sendSystemMessage(Component.literal("§7/pmwlite forecast §8预报 · §7/pmwlite reinforce §8瞄准加固"));
                     return 1;
                 })));
+    }
+
+    /**
+     * 大气场自检：控制台也能跑（网格按命令位置临时建立），所以专用服务器冒烟测试可以覆盖到。
+     * 返回 1 表示全部通过，0 表示有失败项。
+     */
+    private int runAtmosCheck(net.minecraft.commands.CommandSourceStack src, int steps) {
+        ServerLevel level = src.getLevel();
+        Vec3 at = src.getPosition();
+        if (src.getPlayer() == null) {
+            // 控制台/命令方块没有"视高"，用该列地表上方一格，避免在 y= 出生点（可能在地下）跑测试
+            int sy = level.getHeight(
+                    net.minecraft.world.level.levelgen.Heightmap.Types.MOTION_BLOCKING_NO_LEAVES,
+                    (int) Math.floor(at.x), (int) Math.floor(at.z));
+            at = new Vec3(at.x, Math.max(at.y, sy + 1), at.z);
+        }
+        var report = com.stellar.pmwlite.atmos.AtmosphereSelfTest.run(level, at, steps);
+        String head = report.failures == 0
+                ? "§a[PMWLite] 大气场自检通过 §7(" + report.checks + " 项全绿)"
+                : "§c[PMWLite] 大气场自检失败 §7" + report.failures + " / " + report.checks + " 项";
+        String where = "§8位置 " + (int) at.x + ", " + (int) at.y + ", " + (int) at.z;
+        src.sendSuccess(() -> Component.literal(head + "\n" + where), false);
+        src.sendSuccess(() -> Component.literal(report.text()), false);
+
+        // 同时写服务端日志：自检的价值一半在"能 grep"，只打在聊天框里等于没做。
+        // 日志里去掉 § 颜色码，方便直接进 CI / 冒烟脚本比对。
+        String plain = report.text().replaceAll("§.", "");
+        if (report.failures == 0) {
+            LOGGER.info("[PMWLite] atmoscheck PASS ({} checks) at {},{},{}\n{}",
+                    report.checks, (int) at.x, (int) at.y, (int) at.z, plain);
+            com.stellar.pmwlite.sound.SoundManager.playUi(src.getPlayer(),
+                    com.stellar.pmwlite.sound.SoundManager.Sfx.UI_CONFIRM, 0.6f, 1.2f);
+        } else {
+            LOGGER.warn("[PMWLite] atmoscheck FAIL {}/{} at {},{},{}\n{}",
+                    report.failures, report.checks, (int) at.x, (int) at.y, (int) at.z, plain);
+        }
+        return report.failures == 0 ? 1 : 0;
     }
 }

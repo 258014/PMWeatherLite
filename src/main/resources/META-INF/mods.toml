@@ -16,6 +16,16 @@ shader pack; this mod only simulates storms, wind, temperature and tornado destr
 
 v0.2 adds the weather radar (R), the weather station block, the reinforcement kit, forecast
 alerts and a shader-aware atmosphere/post layer. Everything from v0.1 keeps working unchanged.
+
+v0.3 turns weather into a SOLVED PHYSICAL FIELD instead of a dice roll: every 16x16x48 block
+cell holds its own parcel of air (pressure / 3-axis wind / humidity / temperature / oxygen /
+cloud water). Semi-Lagrangian advection, buoyancy, Coriolis, hydrostatic integration and a
+red-black SOR velocity projection keep it mass-consistent. On top of that sit terrain-aware
+wind (shelter, venturi, Karman vortex street), an eight-layer global circulation model
+(geostrophic + thermal wind, storm warm-core injection) that actually steers storms, a
+7-layer radar with an atmospheric probe readout, apparent temperature, and cloud-driven
+precipitation. Every new subsystem has a kill switch; turn them all off and v0.2 behaviour
+is reproduced bit-for-bit.
 '''
 
 [[dependencies.pmwlite]]

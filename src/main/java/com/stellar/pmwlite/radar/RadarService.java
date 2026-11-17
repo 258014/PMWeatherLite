@@ -83,4 +83,34 @@ public final class RadarService {
 
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
     }
+
+    /**
+     * 单层大气数据（雷达图层切换时按需请求）。
+     * 图层编号在 {@code AtmosLayerPacket} 里定义，超出范围会被夹紧。
+     */
+    public static void sendLayer(ServerPlayer player, int kind) {
+        ServerLevel level = player.serverLevel();
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                com.stellar.pmwlite.radar.LayerSampler.sample(level, player, kind));
+    }
+
+    /**
+     * 1 Hz 大气探针推送。HUD 与雷达信息栏共用这一份数据，保证显示与判定同源。
+     */
+    public static void sendProbe(ServerPlayer player) {
+        PMWLite mod = PMWLite.instance();
+        if (mod == null) return;
+        ServerLevel level = player.serverLevel();
+        var manager = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, mod.config());
+        var probe = new com.stellar.pmwlite.atmos.AtmosphereGrid.Probe();
+        boolean ok = manager.probe(player.position().add(0, player.getEyeHeight(), 0), probe);
+        com.stellar.pmwlite.network.AtmosProbePacket packet = ok
+                ? new com.stellar.pmwlite.network.AtmosProbePacket(true, probe.underground,
+                probe.pressureHpa, probe.tempC, probe.humidity, probe.oxygen,
+                probe.windSpeed, probe.apparentC, probe.dewPointC, probe.cloudBaseM,
+                probe.cloud, 0f)
+                : new com.stellar.pmwlite.network.AtmosProbePacket(false, false,
+                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+    }
 }

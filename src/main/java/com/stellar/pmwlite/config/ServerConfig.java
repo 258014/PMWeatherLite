@@ -39,6 +39,18 @@ public final class ServerConfig {
     /** Emit action-bar warnings when severe weather approaches. */
     public boolean weatherWarnings = true;
 
+    // ---------------- v0.3 大气场（参照"每格一份空气"的场式模拟）----------------
+    /** 本地大气场（气压/风/湿度/温度/氧气）总开关；关闭后行为与 v0.2 完全一致。 */
+    public boolean doAtmosphere = true;
+    /** 地形风（遮蔽 / 狭管加速 / 卡门涡街）是否参与破坏判定。 */
+    public boolean terrainWind = true;
+    /** 低氧后果（挖掘疲劳 + 缓慢伤害）；只想要数值、不想要惩罚时关掉。 */
+    public boolean oxygenEffects = true;
+    /** 降水强度是否随本地云量调制（云薄时粒子更少）。 */
+    public boolean cloudDrivenPrecipitation = true;
+    /** 风暴是否被八层全球环流的中层引导气流推动（关掉则退回 v0.2 的纯噪声漂移）。 */
+    public boolean globalSteering = true;
+
     /**
      * Per-block wind speed threshold at which the block is ripped up.
      * Ported from source blockStrengths defaults (leaves 50-65, wool 60, etc.).

@@ -55,6 +55,32 @@ public final class StormOverlayLayer {
 
         // 4) compact HUD badge so the state is readable without opening the radar
         if (i > 0.55f) badge(g, w, i);
+        // 5) 大气读数（v0.3）：气压/气温/湿度/氧气/体感，仅在有数据时显示
+        atmosHud(g, w);
+    }
+
+    /**
+     * 右上角大气读数。数字直接来自服务端探针包，所以屏幕上看到的就是判定用的那份，
+     * 不会出现"显示 21% 氧气却已经在扣血"这类不一致。
+     */
+    private static void atmosHud(GuiGraphics g, int w) {
+        var probe = ClientRadarCache.probe();
+        if (probe == null || !probe.valid() || !ClientRadarCache.probeFresh()) return;
+        Minecraft mc = Minecraft.getInstance();
+        int y = 20;
+        String l1 = String.format("§7%.1f§8hPa  §7%.1f§8°C  §7%.0f%%RH",
+                probe.pressureHpa(), probe.tempC(), probe.humidity() * 100f);
+        String l2 = String.format("§7O₂ §f%.1f%%  §7风 §f%.1fm/s  §7体感 §f%.1f§8°C",
+                probe.oxygen() * 100f, probe.windSpeed(), probe.apparentC());
+        int wpx = Math.max(mc.font.width(l1), mc.font.width(l2)) + 8;
+        int x = w - wpx - 6;
+        g.fill(x - 2, y - 3, w - 4, y + 20, 0x55101418);
+        g.drawString(mc.font, l1, x, y, 0xFFFFFF, false);
+        g.drawString(mc.font, l2, x, y + 10, 0xFFFFFF, false);
+
+        if (probe.oxygen() < 0.145f) {
+            g.drawString(mc.font, "§c⚠ 空气稀薄", x, y + 22, 0xFF6666, false);
+        }
     }
 
     private static void vignette(GuiGraphics g, int w, int h, float t) {

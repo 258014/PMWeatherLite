@@ -87,7 +87,11 @@ public class Storm {
         tickCount++;
 
         lastPosition = position;
-        velocity = velocity.scale(RESISTANCE).add(backgroundDrift(cfg));
+        // 漂移项按 (1 − RESISTANCE) 缩放，稳态速度才等于 backgroundDrift 本身。
+        // 直接相加的话，阻尼 0.985 会把稳态放大 1/0.015 ≈ 67 倍：
+        // 实测风暴 2 秒跑 200 格（100 格/秒），比真实雷暴快一个数量级。
+        velocity = velocity.scale(RESISTANCE)
+                .add(backgroundDrift(cfg).scale(1f - RESISTANCE));
         position = position.add(velocity.scale(TICK_CONVERSION));
 
         // spin accumulates with wind / width, mirroring VolumeShader.tick()

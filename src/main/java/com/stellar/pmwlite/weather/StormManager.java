@@ -19,6 +19,9 @@ public final class StormManager {
     private final List<Storm> storms = new ArrayList<>();
     private long nextId = 1;
     private int spawnCooldownTicks = 0;
+    /** v0.3: 全球模型按需初始化，避免没人看的时候也建场。 */
+    private com.stellar.pmwlite.atmos.GlobalModel globalModel;
+    private final float[] steerBuf = new float[2];
 
     public StormManager(ServerLevel level, ServerConfig cfg) {
         this.level = level;
@@ -29,13 +32,40 @@ public final class StormManager {
 
     /** Called every server tick from ServerTickEvent.Post. */
     public void tick() {
-        for (Storm s : storms) s.tick(cfg);
+        // v0.3: 引导气流来自八层全球模型第 3 层（约 2000 m，中层）。关掉开关即退回纯噪声漂移。
+        boolean steer = cfg.globalSteering && cfg.doAtmosphere;
+        for (Storm s : storms) {
+            s.tick(cfg);
+            if (steer) steer(s);
+        }
         storms.removeIf(s -> s.dead);
 
         if (--spawnCooldownTicks <= 0) {
             trySpawn();
             spawnCooldownTicks = 20 * 60; // evaluate once per minute
         }
+    }
+
+    /**
+     * 把风暴速度缓慢拉向中层引导气流。
+     *
+     * 这不是"瞬移"：每 tick 只修正 1%，配合 Storm 自带的 0.985 阻尼，
+     * 风暴会在十几秒内平滑转到引导气流方向，然后被地形/噪声扰动带着走。
+     * 目标速度取引导气流的 55%——真实风暴的移速通常只有 700 hPa 风速的一半左右。
+     */
+    private void steer(Storm s) {
+        if (!global().steeringWind(s.position.x, s.position.z, steerBuf)) return;
+        double tx = steerBuf[0] * 0.55;
+        double tz = steerBuf[1] * 0.55;
+        s.velocity = s.velocity.add((tx - s.velocity.x) * 0.01, 0.0, (tz - s.velocity.z) * 0.01);
+    }
+
+    /** 全局模型按需取出（与大气场共用同一份，不重复计算）。 */
+    private com.stellar.pmwlite.atmos.GlobalModel global() {
+        if (globalModel == null) {
+            globalModel = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, cfg).global();
+        }
+        return globalModel;
     }
 
     private void trySpawn() {

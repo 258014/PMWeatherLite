@@ -7,7 +7,7 @@
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.2.0+-orange)](https://files.minecraftforge.net/)
 [![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
-[![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)]()
+[![Version](https://img.shields.io/badge/version-0.3.0-lightgrey)]()
 
 **English** | [简体中文](README.md)
 
@@ -151,6 +151,55 @@ layers and yields:
 All three are independent and individually switchable (`/pmwlite fx`, `/pmwlite hud`). Any
 layer that fails falls back to the next one — no black screen, no conflict.
 
+### Atmosphere field: one parcel of air per cell (v0.3)
+
+In v0.1/v0.2 weather was an **entity** — a `Storm` object dragging a Rankine vortex around,
+with the weather type decided by noise and dice rolls. v0.3 replaces it with a **field**: the
+256×256×384 blocks around the player are split into **16×8×16 = 2048 cells, each holding its own
+parcel of air**, solved every 3 ticks. Destruction, precipitation, the HUD and the radar all
+read from that field.
+
+```
+ global circulation 8×8 columns × 8 layers (10 m → 16 km)  ← geostrophic / thermal wind / storm warm core
+        ↓ background + steering flow
+ local grid 16×16×8 cells (16×16×48 blocks each)           ← advection / buoyancy / Coriolis / hydrostatics / RBSOR
+        ↓ surface boundary condition
+ terrain wind, per column (16 blocks)                      ← shelter / venturi / Kármán vortex street
+```
+
+Each step actually solves equations:
+
+| Step | What it does |
+|---|---|
+| Hydrostatic integration | `p(y) = p_sfc·exp(−g·h/(R·Tv))` → warm moist columns get high pressure aloft, so the pressure gradient really drives wind |
+| Buoyancy | virtual-temperature anomaly + moisture loading → vertical velocity `w` |
+| Semi-Lagrangian advection | temperature / humidity / oxygen / cloud travel with the wind, unconditionally stable |
+| Momentum | `−∇p/ρ` + large-scale relaxation + surface friction + Coriolis (latitude faked as `z/3000×80°`) |
+| RBSOR projection | red-black SOR on `∇²φ = ∇·u`, correcting **u, v and w**, to kill divergence |
+
+Things that only show up in a field simulation: thermal lows over warm ground, highs aloft,
+calm lee sides, accelerated wind in gaps between buildings, periodic vortex shedding downwind,
+and storms steered by the 2000 m flow instead of wandering randomly.
+
+**The radar grew from one map to seven layers** (`1`..`7` or `←/→`): precipitation/cloud,
+pressure, temperature, humidity, oxygen, wind (with arrows), apparent temperature. Solid terrain
+is drawn transparent, so a tunnel you dig shows up as a real hole. The HUD keeps pressure,
+temperature, apparent temperature, cloud base, wind and oxygen on screen.
+
+**Apparent temperature** uses the official formulas rather than a fudge factor: wind chill
+(NWS 2001, T ≤ 10 ℃) and heat index (Rothfusz, T ≥ 27 ℃), with cloud base from `LCL = 125×(T−Td)`.
+**Oxygen** below 14.5% applies mining fatigue; below 8.5% deals 1 drown damage every 2 s
+(switchable).
+
+**All five switches off reproduces v0.2 bit-for-bit**: `doAtmosphere` / `terrainWind` /
+`oxygenEffects` / `cloudDrivenPrecipitation` / `globalSteering`. Every existing public method
+signature, record field and command semantic is unchanged.
+
+Self-check: `/pmwlite atmoscheck [steps]` (works from console) asserts no NaN, field values in
+physical range, strictly decreasing pressure with height, mean divergence < 0.5 s⁻¹, bounded
+global winds, non-zero geostrophic wind, six formula reference points, and a storm surviving
+40 ticks.
+
 ---
 
 ## Requirements
@@ -165,7 +214,7 @@ layer that fails falls back to the next one — no black screen, no conflict.
 ## Installation
 
 1. Install Forge 1.20.1-47.2.0;
-2. Drop `PMWeatherLite-0.2.0.jar` into `.minecraft/mods/`;
+2. Drop `PMWeatherLite-0.3.0.jar` into `.minecraft/mods/`;
 3. Launch. **No configuration needed.** Works with or without shaders.
 
 ## Commands
@@ -203,7 +252,7 @@ Key bind: **R** opens the weather radar (rebindable under Options → Controls �
 git clone <this-repo>
 cd PMWeatherLite
 ./gradlew build          # Windows: gradlew.bat build
-# output: build/libs/PMWeatherLite-0.2.0.jar
+# output: build/libs/PMWeatherLite-0.3.0.jar
 ```
 
 The first build downloads ForgeGradle and Minecraft dependencies (1–2 minutes).

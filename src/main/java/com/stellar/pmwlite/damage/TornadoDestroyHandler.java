@@ -1,5 +1,6 @@
 package com.stellar.pmwlite.damage;
 
+import com.stellar.pmwlite.atmos.TerrainWind;
 import com.stellar.pmwlite.config.ServerConfig;
 import com.stellar.pmwlite.weather.Storm;
 import com.stellar.pmwlite.weather.StormManager;
@@ -67,11 +68,27 @@ public final class TornadoDestroyHandler {
         com.stellar.pmwlite.fortify.FortificationManager fortify =
                 com.stellar.pmwlite.fortify.FortificationManager.of(level);
 
+        // v0.3: 地形风。来流方向取背景风（大尺度），逐列（16 格）取修正系数：
+        // 山背 / 楼后 0.15~0.95，巷子口 1.45，背风侧再叠一个相位摆动。
+        // 只做一次每列采样（约 49 次/扫描，结果缓存 10 tick），不进逐方块热循环。
+        boolean useTerrain = cfg.terrainWind && cfg.doAtmosphere;
+        TerrainWind.Result terrain = useTerrain ? new TerrainWind.Result() : null;
+        float flowX = (float) background.x;
+        float flowZ = (float) background.z;
+        long now = level.getGameTime();
+
         // sample a limited band around the funnel core for performance
         for (int dx = -3; dx <= 3; dx++) {
             for (int dz = -3; dz <= 3; dz++) {
                 if (dx * dx + dz * dz > 12) continue;
                 int x = cx + dx, z = cz + dz;
+
+                float terrainScale = 1f;
+                if (useTerrain) {
+                    TerrainWind.sample(level, x, z, groundY, flowX, flowZ, now, terrain);
+                    terrainScale = terrain.factor * (1f + terrain.gust);
+                }
+
                 for (int y = groundY; y <= groundY + 6; y++) {
                     BlockPos pos = new BlockPos(x, y, z);
                     BlockState state = level.getBlockState(pos);
@@ -93,6 +110,7 @@ public final class TornadoDestroyHandler {
                     Vec3 bp = new Vec3(x + 0.5, y + 0.5, z + 0.5);
                     Vec3 localWind = wind.getWind(bp, background, storms);
                     float windSpeed = (float) localWind.length() * 3.6f; // m/s -> mph-ish scale
+                    if (useTerrain) windSpeed *= terrainScale;
                     if (windSpeed < threshold) continue;
 
                     // rip it up into a swirling falling block (1.20.1: FallingBlockEntity.fall)

@@ -8,7 +8,7 @@
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.2.0+-orange)](https://files.minecraftforge.net/)
 [![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
-[![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)]()
+[![Version](https://img.shields.io/badge/version-0.3.0-lightgrey)]()
 
 ---
 
@@ -128,6 +128,45 @@ v0.2 新增 10 个**具名音效事件**（`alert.blue/yellow/orange/red`、`rad
 
 三层各自独立、各自可关（`/pmwlite fx`、`/pmwlite hud`），任何一层失败都只回退到下一层，**不会黑屏、不会冲突**。
 
+### 大气场：每格一份空气（v0.3）
+
+v0.1/v0.2 的天气是「实体」——一个 `Storm` 对象带着 Rankine 涡旋在世界里飘，天气类型由噪声 + 概率决定。
+v0.3 换成「场」：玩家周围 256×256×384 格被切成 **16×8×16 = 2048 个格子，每格独立持有一份空气**，
+每 3 tick 解一次方程，破坏判定、降水、HUD、雷达全部从场里读数。
+
+```
+ 全球环流 8×8 列 × 8 层（10 m → 16 km）   ← 地转风 / 热成风 / 风暴暖心低压注入
+        ↓ 背景场 + 引导气流
+ 本地网格 16×16×8 格（每格 16×16×48 方块） ← 平流 / 浮力 / 科氏 / 静力学 / RBSOR 投影
+        ↓ 近地面边界条件
+ 地形风    逐列（16 格）                  ← 遮蔽 / 狭管加速 / 卡门涡街
+```
+
+单步解的是真方程，不是查表：
+
+| 步骤 | 做什么 |
+|---|---|
+| 静力学积分 | `p(y) = p_sfc·exp(−g·h/(R·Tv))` → 暖湿气柱高层高压，**气压梯度真的驱动风** |
+| 浮力 | 虚温异常 + 水汽浮力 → 垂直速度 `w` |
+| 半拉格朗日平流 | 温度/湿度/氧气/云量随风走，无条件稳定 |
+| 动量 | `−∇p/ρ` + 底风松弛 + 地面摩擦 + 科氏偏转（纬度假设为 `z/3000×80°`） |
+| RBSOR 投影 | 红黑超松弛解 `∇²φ = ∇·u`，**u/v/w 三个分量一起**修正，压掉散度 |
+
+于是出现了只有场式模拟才有的现象：暖区是热低压、高层是高压、山谷背风侧风小、巷子口风大、
+背风面有周期性的涡街摆动、风暴被 2000 m 的中层引导气流推着走（不是随机游走）。
+
+**雷达从 1 张图变 7 层**（`1`..`7` 或 `←/→` 切换）：降水/云量、气压、气温、相对湿度、氧气、风场（带箭头）、
+体感温度。实心地形画成透明，所以地下挖洞时雷达上会看到真实形状的空洞。HUD 常驻气压/气温/体感/云底/风/含氧量。
+
+**体感温度**用两套官方经验公式而不是拍系数：风寒（NWS 2001，T ≤ 10 ℃）+ 热指数（Rothfusz，T ≥ 27 ℃），
+云底用 `LCL = 125×(T−Td)`。**氧气**低于 14.5% 给挖掘疲劳、低于 8.5% 每 2 秒 1 点溺水伤害（可关）。
+
+**5 个开关全关 = 逐位回到 v0.2**：`doAtmosphere` / `terrainWind` / `oxygenEffects` /
+`cloudDrivenPrecipitation` / `globalSteering`。所有既有公开方法签名、记录字段、命令语义未变。
+
+自检入口 `/pmwlite atmoscheck [步数]`（控制台可跑）：断言无 NaN、场值在物理区间、气压随高度严格递减、
+平均散度 < 0.5 s⁻¹、八层模型风有界、地转风非零、六个经验公式参考点、风暴 40 tick 后仍存活。
+
 ---
 
 ## 环境要求
@@ -142,7 +181,7 @@ v0.2 新增 10 个**具名音效事件**（`alert.blue/yellow/orange/red`、`rad
 ## 安装
 
 1. 安装 Forge 1.20.1-47.2.0；
-2. 把 `PMWeatherLite-0.2.0.jar` 放进 `.minecraft/mods/`；
+2. 把 `PMWeatherLite-0.3.0.jar` 放进 `.minecraft/mods/`；
 3. 启动即可，**无需任何配置**。有光影就开光影，没有就用原版天气渲染。
 
 ## 命令
@@ -161,6 +200,9 @@ v0.2 新增 10 个**具名音效事件**（`alert.blue/yellow/orange/red`、`rad
 | `/pmwlite forecast` | 打印当前位置预报 |
 | `/pmwlite assets` | 固定资产 / 加固 / 气象站覆盖统计 |
 | `/pmwlite reinforce` | 加固准星 6 格内的方块 |
+| `/pmwlite atmos` | 打印脚下的大气读数（气压/气温/露点/湿度/氧气/云量/云底/风/体感） |
+| `/pmwlite global` | 打印当前位置的八层大气剖面（气压/温度/云量/风速） |
+| `/pmwlite atmoscheck [步数]` | 大气场自检：无 NaN、静力学单调、散度、地转风、经验公式参考点 |
 | `/pmwlite hint` | 操作提示 |
 
 客户端命令，**不需要 OP**，只在本地执行：
@@ -180,7 +222,7 @@ v0.2 新增 10 个**具名音效事件**（`alert.blue/yellow/orange/red`、`rad
 git clone <this-repo>
 cd PMWeatherLite
 ./gradlew build          # Windows: gradlew.bat build
-# 产物：build/libs/PMWeatherLite-0.2.0.jar
+# 产物：build/libs/PMWeatherLite-0.3.0.jar
 ```
 
 首次构建会下载 ForgeGradle 与 Minecraft 依赖（约 1–2 分钟）。离线构建可加 `--offline`。
@@ -205,6 +247,7 @@ v4 做过一轮算法与分配优化，实测（单线程微基准，20,000 次�
 | 每风暴每 tick 噪声采样 | 8 次 simplex | **4.2 次** |
 | 桥接层 玩家×事件 遍历 | 3 趟 | **1 趟** |
 | 强降水粒子网络包 | ~60 包/秒/玩家 | **~10 包/秒/玩家** |
+| 大气场单步（v0.3，2048 格 + 8 次 RBSOR） | — | **690 µs / 步**，每 3 tick 一步 → 均摊 0.24 ms/tick（tick 预算的 0.5%） |
 
 数值一致性：300 组随机探空柱对拍，相态与 CAPE **零偏差**。
 
@@ -238,6 +281,14 @@ src/main/java/com/stellar/pmwlite/
 ├── sound/SoundManager.java      音效、静音、冷却
 ├── config/ServerConfig.java     生成概率、方块阈值表
 │
+├── atmos/                       v0.3 大气场
+│   ├── AtmosphereGrid.java      本地网格：平流/浮力/科氏/静力学/RBSOR 投影
+│   ├── GlobalModel.java         八层全球环流：地转风/热成风/风暴注入
+│   ├── TerrainWind.java         地形风：遮蔽/狭管/卡门涡街
+│   ├── AtmosphereManager.java   调度、节流、低氧后果、统一查询
+│   ├── ApparentTemperature.java 风寒/热指数/露点/云底/比湿
+│   └── AtmosphereSelfTest.java  物理不变量自检（/pmwlite atmoscheck）
+│
 ├── registry/ModRegistry.java    音效 / 方块 / 物品 / 创造标签注册
 ├── asset/                       IFixedAsset + FixedAssetManager（按维度的固定资产登记表）
 ├── fortify/FortificationManager.java   加固加成表
@@ -261,7 +312,8 @@ src/main/java/com/stellar/pmwlite/
 | [04-优化评估报告-v2](docs/04-优化评估报告-v2.md) | 第一轮性能/稳定性评估 |
 | [05-音效与反馈-v3](docs/05-音效与反馈-v3.md) | 音效系统与交互反馈设计 |
 | [06-算法与性能优化-v4](docs/06-算法与性能优化-v4.md) | 本轮算法与分配优化、基准数据、验证方式 |
-| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | **本轮**：模块清单、实现范围、验收标准、实测记录 |
+| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | v0.2：模块清单、实现范围、验收标准、实测记录 |
+| [08-大气场-v3](docs/08-大气场-v3.md) | **本轮**：三层场式模拟的方程、接线点、开关、自检与限制 |
 
 ---
 

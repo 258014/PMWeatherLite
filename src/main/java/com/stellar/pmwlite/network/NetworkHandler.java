@@ -13,7 +13,11 @@ import net.minecraftforge.network.simple.SimpleChannel;
  * packet layout changes, so mismatched clients are rejected cleanly instead of desyncing.
  */
 public final class NetworkHandler {
-    private static final String PROTOCOL = "1";
+    /**
+     * v0.3 新增了图层收/发两个包，协议号必须跟着升，否则 v0.2 客户端会用错位的解码器
+     * 去读 v0.3 的数据包。宁可让版本不匹配的客户端连不上，也不要静默串包。
+     */
+    private static final String PROTOCOL = "2";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.ChannelBuilder
             .named(new ResourceLocation(PMWLite.MOD_ID, "main"))
@@ -36,6 +40,24 @@ public final class NetworkHandler {
                 .encoder(RadarRequestPacket::encode)
                 .decoder(RadarRequestPacket::decode)
                 .consumerMainThread(RadarRequestPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(AtmosLayerPacket.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(AtmosLayerPacket::encode)
+                .decoder(AtmosLayerPacket::decode)
+                .consumerMainThread(AtmosLayerPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(AtmosLayerRequestPacket.class, id++, NetworkDirection.PLAY_TO_SERVER)
+                .encoder(AtmosLayerRequestPacket::encode)
+                .decoder(AtmosLayerRequestPacket::decode)
+                .consumerMainThread(AtmosLayerRequestPacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(AtmosProbePacket.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(AtmosProbePacket::encode)
+                .decoder(AtmosProbePacket::decode)
+                .consumerMainThread(AtmosProbePacket::handle)
                 .add();
     }
 }

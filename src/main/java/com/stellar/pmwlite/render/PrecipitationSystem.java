@@ -1,5 +1,8 @@
 package com.stellar.pmwlite.render;
 
+import com.stellar.pmwlite.atmos.AtmosphereGrid;
+import com.stellar.pmwlite.atmos.AtmosphereManager;
+import com.stellar.pmwlite.config.ServerConfig;
 import com.stellar.pmwlite.weather.StormManager;
 import com.stellar.pmwlite.weather.Thermodynamics;
 import com.stellar.pmwlite.weather.WeatherSystem;
@@ -38,6 +41,11 @@ import net.minecraft.world.phys.Vec3;
 public final class PrecipitationSystem {
     private int tick = 0;
 
+    /** 云量调制下限：云量再低也保留三成降水粒子，避免网格重定位时雨"消失一下"。 */
+    private static final float CLOUD_FLOOR = 0.3f;
+    /** 云量到这个值以上算"完全成云"，不再衰减。 */
+    private static final float CLOUD_FULL = 0.45f;
+
     /** Cached precipitation phase per 64-block column: key = (cellX << 32) ^ cellZ. */
     private final Long2ObjectOpenHashMap<PhaseCache> phaseCache = new Long2ObjectOpenHashMap<>(64);
 
@@ -47,7 +55,12 @@ public final class PrecipitationSystem {
         PhaseCache(Thermodynamics.Precipitation p, long e) { phase = p; expiry = e; }
     }
 
+    /** v0.2 兼容入口：不接大气场，行为与旧版逐位一致。 */
     public void tick(ServerLevel level, StormManager manager, WeatherSystem weather) {
+        tick(level, manager, weather, null);
+    }
+
+    public void tick(ServerLevel level, StormManager manager, WeatherSystem weather, ServerConfig cfg) {
         if (++tick % 2 != 0) return;
         if (level.players().isEmpty()) return;
         long now = level.getGameTime();
@@ -56,11 +69,28 @@ public final class PrecipitationSystem {
         int players = level.players().size();
         int countScale = players > 8 ? 2 : (players > 3 ? 3 : 4);
 
+        // v0.3: 云量调制。云是长在空中的，所以要查整根气柱的云量，而不是玩家脚下那一格。
+        boolean cloudDriven = cfg != null && cfg.cloudDrivenPrecipitation && cfg.doAtmosphere;
+        AtmosphereGrid grid = cloudDriven
+                ? AtmosphereManager.of(level, cfg).grid() : null;
+        if (grid != null && !grid.ready()) grid = null;
+
         for (var player : level.players()) {
             Vec3 p = player.position();
             float intensity = Math.max(manager.precipitationAt(p),
                     weather == null ? 0f : weather.precipitationAt(p));
             if (intensity < 0.12f) continue;
+
+            if (grid != null) {
+                float cloud = grid.columnCloud(p.x, p.z);
+                // 0.3 → 1.0：云量只"削减"不"抹杀"。
+                // 下限是必要的——网格重定位会把云量清 0，若允许打死就会在玩家飞行时
+                // 出现"雨声在响但粒子里没有雨"的断裂；0.3 的下限保证强降水始终可见。
+                float mod = CLOUD_FLOOR + (1f - CLOUD_FLOOR)
+                        * Mth.clamp(cloud / CLOUD_FULL, 0f, 1f);
+                intensity *= mod;
+                if (intensity < 0.12f) continue;
+            }
 
             Thermodynamics.Precipitation phase = cachedPhase(level, manager, p, now);
             if (phase == Thermodynamics.Precipitation.NONE) continue;
