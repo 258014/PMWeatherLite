@@ -1,0 +1,14 @@
+{
+  "blend": { "func": "add", "srcrgb": "one", "dstrgb": "zero" },
+  "vertex": "pmwlite:storm_blit",
+  "fragment": "pmwlite:storm_blit",
+  "samplers": [
+    { "name": "DiffuseSampler" }
+  ],
+  "uniforms": [
+    { "name": "OutSize", "type": "float", "count": 2, "values": [ 854.0, 480.0 ] }
+  ],
+  "attributes": [
+    { "name": "Position" }
+  ]
+}

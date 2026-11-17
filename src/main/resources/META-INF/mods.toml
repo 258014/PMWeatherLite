@@ -13,6 +13,9 @@ description='''
 A Forge 1.20.1 reimplementation of the storm physics / thermodynamic weather simulation,
 designed to coexist WITH shader packs (Oculus/Iris). Rendering of clouds is delegated to the
 shader pack; this mod only simulates storms, wind, temperature and tornado destruction.
+
+v0.2 adds the weather radar (R), the weather station block, the reinforcement kit, forecast
+alerts and a shader-aware atmosphere/post layer. Everything from v0.1 keeps working unchanged.
 '''
 
 [[dependencies.pmwlite]]

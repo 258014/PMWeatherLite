@@ -1,0 +1,5 @@
+{
+  "variants": {
+    "": { "model": "pmwlite:block/weather_station" }
+  }
+}

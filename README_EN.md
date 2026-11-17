@@ -7,7 +7,7 @@
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.2.0+-orange)](https://files.minecraftforge.net/)
 [![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
-[![Version](https://img.shields.io/badge/version-0.1.0-lightgrey)]()
+[![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)]()
 
 **English** | [简体中文](README.md)
 
@@ -26,7 +26,7 @@ The key difference from the original: **not a single line of post-processing cod
 | Platform | 1.21.1 NeoForge | **1.20.1 Forge** |
 | Rendering | Veil 4.2.1, full-screen raymarched volumetric clouds | **No rendering**; only drives vanilla `rain` / `thunder` state |
 | Shader compat | Conflicts with `replace: true` in most packs | **Fully compatible** (clouds come from the pack) |
-| Visual layer | Custom shaders + custom entities | Vanilla particles + vanilla sound events (zero custom assets) |
+| Visual layer | Custom shaders + custom entities | Vanilla particles + vanilla sound events + optional post/overlay layers |
 
 **Why not a straight port**: PMWeather only ships for 1.21.1 NeoForge and hard-depends on
 the Veil library. On 1.20.1 + Forge there is no Veil and no matching render pipeline — and
@@ -109,6 +109,48 @@ Everything reuses vanilla `SoundEvent`s (zero `.ogg` assets): touchdown siren, s
 weather alert, command confirm/deny, per-player mute. Alerts go to the action bar, coloured
 by EF scale and weather type.
 
+v0.2 adds ten **named** sound events (`alert.blue/yellow/orange/red`, `radar.ping`,
+`station.scan`, `fortify.apply`, ...). The mod owns the ids; the actual audio is bound to
+existing vanilla events through `sounds.json` `"type": "event"`, so every sound can be
+replaced or silenced by a resource pack without shipping any audio in the jar.
+
+### Weather radar (v0.2)
+
+Press **R**. The server packs every storm, weather event and fixed asset within 512 blocks
+into a single packet (132 bytes measured) and the client only renders:
+
+- range rings are generated procedurally into a `DynamicTexture` — no PNG is shipped;
+- red = storm (scaled by influence radius), amber = weather event, cyan = weather station;
+- the side panel shows alert tier, risk, ETA, confidence, expected types and the
+  reinforcement count;
+- a snapshot older than 2.5 s is labelled "stale" instead of pretending to be live.
+
+### Weather station and reinforcement (v0.2)
+
+| Item | Effect |
+|---|---|
+| **Weather Station** | Right-click prints a four-line forecast; grants +10% confidence ("precise") within 256 blocks; **immune to storm destruction** |
+| **Reinforcement Kit** | Right-click any block: +15 wind threshold (cap +60), one durability per step (64 uses) |
+
+Forecasts reuse the **exact thermodynamics that spawn storms** (`buildProfile` +
+`formationRisk`), so they warn about what is about to happen rather than narrating it.
+Four tiers follow CMA colours: risk `0.35 / 0.65 / 0.95 / 1.25` → blue / yellow / orange /
+red. Escalations fire immediately, yellow and above repeat every 30 s, downgrades stay silent.
+
+### Shader compatibility layer and post-processing (v0.2)
+
+The one thing this version must not do is fight a shader pack for the post chain. So it
+layers and yields:
+
+| Layer | Shader pack active | No shader pack |
+|---|---|---|
+| Fog (`ViewportEvent`) | **off** (Iris computes its own) | far plane pulled in, tinted slate/snow |
+| Post `PostChain` | **off** | haze + desaturation + vignette + lightning, two passes |
+| Screen overlay (2D pipeline) | vignette only (avoids double rain) | vignette + rain streaks + flash + intensity badge |
+
+All three are independent and individually switchable (`/pmwlite fx`, `/pmwlite hud`). Any
+layer that fails falls back to the next one — no black screen, no conflict.
+
 ---
 
 ## Requirements
@@ -123,12 +165,12 @@ by EF scale and weather type.
 ## Installation
 
 1. Install Forge 1.20.1-47.2.0;
-2. Drop `PMWeatherLite-0.1.0.jar` into `.minecraft/mods/`;
+2. Drop `PMWeatherLite-0.2.0.jar` into `.minecraft/mods/`;
 3. Launch. **No configuration needed.** Works with or without shaders.
 
 ## Commands
 
-OP level 2 required:
+Server-side, OP level 2 required:
 
 | Command | Effect |
 |---|---|
@@ -138,6 +180,20 @@ OP level 2 required:
 | `/pmwlite status` | Active events, storm count, remaining time, mute state |
 | `/pmwlite mute` | Toggle your personal weather-sound mute |
 | `/pmwlite clear` | Clear all weather and storms |
+| `/pmwlite radar` | Push one radar snapshot (same as pressing R) |
+| `/pmwlite forecast` | Print the forecast for your position |
+| `/pmwlite assets` | Fixed assets / reinforcement / station coverage |
+| `/pmwlite reinforce` | Reinforce the block within 6 blocks of your crosshair |
+| `/pmwlite hint` | Show quick help |
+
+Client-side, **no OP needed**, executes locally:
+
+| Command | Effect |
+|---|---|
+| `/pmwlite fx [on\|off\|status]` | Toggle the post-processing pass (fog and overlay unaffected) |
+| `/pmwlite hud [on\|off]` | Toggle the screen overlay (rain / vignette / flash) |
+
+Key bind: **R** opens the weather radar (rebindable under Options → Controls → PMWeather Lite).
 
 ---
 
@@ -147,7 +203,7 @@ OP level 2 required:
 git clone <this-repo>
 cd PMWeatherLite
 ./gradlew build          # Windows: gradlew.bat build
-# output: build/libs/PMWeatherLite-0.1.0.jar
+# output: build/libs/PMWeatherLite-0.2.0.jar
 ```
 
 The first build downloads ForgeGradle and Minecraft dependencies (1–2 minutes).
@@ -225,6 +281,7 @@ All design documents are currently in Chinese.
 | [04-优化评估报告-v2](docs/04-优化评估报告-v2.md) | First performance/stability review |
 | [05-音效与反馈-v3](docs/05-音效与反馈-v3.md) | Sound system and interaction feedback |
 | [06-算法与性能优化-v4](docs/06-算法与性能优化-v4.md) | Algorithm/allocation work, benchmarks, verification |
+| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | **This release**: module list, scope, acceptance criteria, measurements |
 
 ---
 
@@ -237,6 +294,11 @@ All design documents are currently in Chinese.
    reproduce the same sequence.
 4. The phase cache is keyed per 64-block column with a 5-second TTL, so crossing a column
    boundary can lag by up to 5 seconds.
+5. **Reinforcement is not persisted** — `FortificationManager` is an in-memory table and
+   resets on restart (same as weather state).
+6. **The weather station reuses vanilla block textures** as placeholders; no custom art yet.
+7. **Fog inside a shader pack is out of our control** — Iris computes it, and this mod
+   deliberately yields.
 
 ---
 

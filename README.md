@@ -8,7 +8,7 @@
 [![Minecraft](https://img.shields.io/badge/Minecraft-1.20.1-62B47A)](https://www.minecraft.net/)
 [![Forge](https://img.shields.io/badge/Forge-47.2.0+-orange)](https://files.minecraftforge.net/)
 [![Java](https://img.shields.io/badge/Java-17-blue)](https://adoptium.net/)
-[![Version](https://img.shields.io/badge/version-0.1.0-lightgrey)]()
+[![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)]()
 
 ---
 
@@ -23,7 +23,7 @@
 | 平台 | 1.21.1 NeoForge | **1.20.1 Forge** |
 | 渲染 | 依赖 Veil 4.2.1，全屏 raymarching 体积云 | **不做渲染**，只驱动原版 `rain` / `thunder` 状态 |
 | 光影兼容 | 与原版 `replace: true` 冲突 | **完全兼容**（云由光影包绘制） |
-| 表现层 | 自定义 shader + 自定义实体 | 原版粒子 + 原版音效事件（零自定义资源） |
+| 表现层 | 自定义 shader + 自定义实体 | 原版粒子 + 原版音效事件 + 可选后处理/叠加层 |
 
 **为什么不直接移植**：PMWeather 只发布 1.21.1 NeoForge 版本，强依赖 Veil 库；1.20.1 + Forge 上既没有 Veil，也没有对应的渲染管线，而且它默认开启的 `replace: true` 会直接顶掉光影包的后处理。所以只能重写。
 
@@ -92,6 +92,42 @@
 
 全部复用原版 `SoundEvent`（零 `.ogg` 资源）：龙卷触地警笛、极端天气预警、命令确认/拒绝音、静音开关。预警文案走 action bar，按 EF 等级和天气类型分色。
 
+v0.2 新增 10 个**具名音效事件**（`alert.blue/yellow/orange/red`、`radar.ping`、`station.scan`、`fortify.apply` 等）。
+它们的 id 由本 mod 持有、声音文件通过 `sounds.json` 的 `"type": "event"` 指向原版事件——
+所以既能被子包/资源包单独替换，又不需要往 jar 里塞任何音频。
+
+### 气象雷达（v0.2）
+
+按 **R** 打开。服务端把 512 格内的风暴、天气事件、固定资产打成**一个**数据包（实测 132 字节）发过来，客户端只做渲染：
+
+- 环形刻度用 `DynamicTexture` 程序化生成，不打包 PNG；
+- 红点=风暴（按影响半径放大）、橙点=天气事件、青点=气象站；
+- 右侧信息栏给预警等级、风险指数、ETA、置信度、可能天气类型、加固计数；
+- 数据超过 2.5 s 未刷新会标「数据过期」，不会假装实时。
+
+### 天气预报机与加固（v0.2）
+
+| 物品 | 作用 |
+|---|---|
+| **天气预报机** | 放置后右键输出四行预报；256 格内把预报置信度 +10% 并标记「精报」；**免疫风暴破坏** |
+| **加固套件** | 右键任意方块，抗风阈值 +15（上限 +60），每级消耗 1 点耐久（64 次） |
+
+预报复用**与风暴生成完全相同的热力学公式**（`buildProfile` + `formationRisk`），所以是「提前看到将要发生的事」，
+而不是事后播报。四级预警对齐 CMA 配色：风险 `0.35 / 0.65 / 0.95 / 1.25` → 蓝 / 黄 / 橙 / 红；
+升级立即播报、≥黄色每 30 s 提醒一次、降级静默。
+
+### 光影兼容层与后处理（v0.2）
+
+这是本版本最需要小心的地方——**不能和光影抢后处理管线**。做法是分层 + 让路：
+
+| 层 | 光影包生效时 | 无光影时 |
+|---|---|---|
+| 雾（`ViewportEvent`） | **关闭**（Iris 自己算雾） | 拉近远平面 + 向板岩灰/雪白偏色 |
+| 后处理 `PostChain` | **关闭** | 雾霾 + 去饱和 + 暗角 + 闪电（两趟 pass） |
+| 屏幕叠加层（2D 管线） | 只保留暗角（避免双份雨） | 暗角 + 雨幕 + 闪电白闪 + 强度徽标 |
+
+三层各自独立、各自可关（`/pmwlite fx`、`/pmwlite hud`），任何一层失败都只回退到下一层，**不会黑屏、不会冲突**。
+
 ---
 
 ## 环境要求
@@ -106,12 +142,12 @@
 ## 安装
 
 1. 安装 Forge 1.20.1-47.2.0；
-2. 把 `PMWeatherLite-0.1.0.jar` 放进 `.minecraft/mods/`；
+2. 把 `PMWeatherLite-0.2.0.jar` 放进 `.minecraft/mods/`；
 3. 启动即可，**无需任何配置**。有光影就开光影，没有就用原版天气渲染。
 
 ## 命令
 
-需要 OP 权限（等级 2）：
+服务端命令，需要 OP 权限（等级 2）：
 
 | 命令 | 作用 |
 |---|---|
@@ -121,6 +157,20 @@
 | `/pmwlite status` | 当前活动事件、风暴数量、剩余时间、静音状态 |
 | `/pmwlite mute` | 切换个人天气音效静音 |
 | `/pmwlite clear` | 清除全部天气与风暴 |
+| `/pmwlite radar` | 推送一次雷达快照（等同按 R） |
+| `/pmwlite forecast` | 打印当前位置预报 |
+| `/pmwlite assets` | 固定资产 / 加固 / 气象站覆盖统计 |
+| `/pmwlite reinforce` | 加固准星 6 格内的方块 |
+| `/pmwlite hint` | 操作提示 |
+
+客户端命令，**不需要 OP**，只在本地执行：
+
+| 命令 | 作用 |
+|---|---|
+| `/pmwlite fx [on\|off\|status]` | 开关后处理管线（不影响雾与叠加层） |
+| `/pmwlite hud [on\|off]` | 开关屏幕叠加层（雨幕/暗角/闪电） |
+
+按键：**R** 打开气象雷达（可在「按键设置 → PMWeather Lite」改键）。
 
 ---
 
@@ -130,7 +180,7 @@
 git clone <this-repo>
 cd PMWeatherLite
 ./gradlew build          # Windows: gradlew.bat build
-# 产物：build/libs/PMWeatherLite-0.1.0.jar
+# 产物：build/libs/PMWeatherLite-0.2.0.jar
 ```
 
 首次构建会下载 ForgeGradle 与 Minecraft 依赖（约 1–2 分钟）。离线构建可加 `--offline`。
@@ -183,10 +233,20 @@ src/main/java/com/stellar/pmwlite/
 │   ├── PrecipitationSystem.java 降水粒子与相态缓存
 │   └── TornadoFX.java           漏斗烟尘粒子
 ├── damage/
-│   ├── TornadoDestroyHandler.java  方块卷起
+│   ├── TornadoDestroyHandler.java  方块卷起（含固定资产免疫 + 加固加成）
 │   └── WildfireSystem.java         风驱火蔓延
 ├── sound/SoundManager.java      音效、静音、冷却
-└── config/ServerConfig.java     生成概率、方块阈值表
+├── config/ServerConfig.java     生成概率、方块阈值表
+│
+├── registry/ModRegistry.java    音效 / 方块 / 物品 / 创造标签注册
+├── asset/                       IFixedAsset + FixedAssetManager（按维度的固定资产登记表）
+├── fortify/FortificationManager.java   加固加成表
+├── forecast/                    ForecastEngine（预报）+ AlertManager（预警播报）
+├── block/WeatherStationBlock.java      天气预报机
+├── item/ReinforcementKitItem.java      加固套件
+├── radar/RadarService.java      服务端雷达快照
+├── network/                     SimpleChannel + 雷达收/发两个包
+└── client/                      仅客户端：雷达 GUI、按键、光影兼容层、后处理、叠加层
 ```
 
 ---
@@ -201,6 +261,7 @@ src/main/java/com/stellar/pmwlite/
 | [04-优化评估报告-v2](docs/04-优化评估报告-v2.md) | 第一轮性能/稳定性评估 |
 | [05-音效与反馈-v3](docs/05-音效与反馈-v3.md) | 音效系统与交互反馈设计 |
 | [06-算法与性能优化-v4](docs/06-算法与性能优化-v4.md) | 本轮算法与分配优化、基准数据、验证方式 |
+| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | **本轮**：模块清单、实现范围、验收标准、实测记录 |
 
 ---
 
@@ -210,6 +271,9 @@ src/main/java/com/stellar/pmwlite/
 2. **两套天气系统并存**：`StormManager`（物理风暴）与 `WeatherSystem`（18 类天气）各自算降水，桥接层取 max。
 3. **RNG 混用** `Math.random()` 与 `level.random`：不影响性能，但同种子无法复现序列。
 4. 相态缓存以 64 格柱 / 5 秒为单位，跨柱边界最多滞后 5 秒。
+5. **加固不持久化**：`FortificationManager` 是内存表，服务器重启后清零（与天气状态一致）。
+6. **天气预报机复用原版方块贴图**作为占位，尚未自绘材质。
+7. **光影包内的雾不受本 mod 控制**：Iris 自算雾，本 mod 主动让路；差异只能靠叠加层与粒子弥补。
 
 ---
 

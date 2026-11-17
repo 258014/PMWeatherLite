@@ -1,0 +1,18 @@
+{
+  "itemGroup.pmwlite": "PMWeather Lite",
+  "block.pmwlite.weather_station": "Weather Station",
+  "item.pmwlite.weather_station": "Weather Station",
+  "item.pmwlite.reinforcement_kit": "Reinforcement Kit",
+  "key.categories.pmwlite": "PMWeather Lite",
+  "key.pmwlite.radar": "Open Weather Radar",
+  "pmwlite.subtitle.storm_ambient": "Storm approaching",
+  "pmwlite.subtitle.tornado_roar": "Tornado roaring",
+  "pmwlite.subtitle.hail_tick": "Hail strikes",
+  "pmwlite.subtitle.alert_blue": "Blue alert",
+  "pmwlite.subtitle.alert_yellow": "Yellow alert",
+  "pmwlite.subtitle.alert_orange": "Orange alert",
+  "pmwlite.subtitle.alert_red": "Red alert",
+  "pmwlite.subtitle.radar_ping": "Radar sweep",
+  "pmwlite.subtitle.station_scan": "Station scan",
+  "pmwlite.subtitle.fortify_apply": "Reinforcement applied"
+}

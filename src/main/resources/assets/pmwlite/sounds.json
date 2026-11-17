@@ -1,0 +1,72 @@
+{
+  "storm_ambient": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.storm_ambient",
+    "sounds": [
+      { "name": "minecraft:weather.rain", "type": "event" }
+    ]
+  },
+  "tornado_roar": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.tornado_roar",
+    "sounds": [
+      { "name": "minecraft:entity.warden.roar", "type": "event" }
+    ]
+  },
+  "hail_tick": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.hail_tick",
+    "sounds": [
+      { "name": "minecraft:block.stone.hit", "type": "event" }
+    ]
+  },
+  "alert.blue": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.alert_blue",
+    "sounds": [
+      { "name": "minecraft:block.note_block.bell", "type": "event" }
+    ]
+  },
+  "alert.yellow": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.alert_yellow",
+    "sounds": [
+      { "name": "minecraft:block.note_block.chime", "type": "event" }
+    ]
+  },
+  "alert.orange": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.alert_orange",
+    "sounds": [
+      { "name": "minecraft:block.note_block.bass", "type": "event" }
+    ]
+  },
+  "alert.red": {
+    "category": "weather",
+    "subtitle": "pmwlite.subtitle.alert_red",
+    "sounds": [
+      { "name": "minecraft:event.raid.horn", "type": "event" }
+    ]
+  },
+  "radar.ping": {
+    "category": "ui",
+    "subtitle": "pmwlite.subtitle.radar_ping",
+    "sounds": [
+      { "name": "minecraft:block.note_block.hat", "type": "event" }
+    ]
+  },
+  "station.scan": {
+    "category": "block",
+    "subtitle": "pmwlite.subtitle.station_scan",
+    "sounds": [
+      { "name": "minecraft:block.beacon.activate", "type": "event" }
+    ]
+  },
+  "fortify.apply": {
+    "category": "block",
+    "subtitle": "pmwlite.subtitle.fortify_apply",
+    "sounds": [
+      { "name": "minecraft:block.anvil.use", "type": "event" }
+    ]
+  }
+}

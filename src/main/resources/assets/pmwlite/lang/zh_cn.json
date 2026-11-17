@@ -1,0 +1,18 @@
+{
+  "itemGroup.pmwlite": "PMWeather Lite",
+  "block.pmwlite.weather_station": "天气预报机",
+  "item.pmwlite.weather_station": "天气预报机",
+  "item.pmwlite.reinforcement_kit": "加固套件",
+  "key.categories.pmwlite": "PMWeather Lite",
+  "key.pmwlite.radar": "打开气象雷达",
+  "pmwlite.subtitle.storm_ambient": "风暴逼近",
+  "pmwlite.subtitle.tornado_roar": "龙卷风咆哮",
+  "pmwlite.subtitle.hail_tick": "冰雹敲击",
+  "pmwlite.subtitle.alert_blue": "蓝色预警",
+  "pmwlite.subtitle.alert_yellow": "黄色预警",
+  "pmwlite.subtitle.alert_orange": "橙色预警",
+  "pmwlite.subtitle.alert_red": "红色预警",
+  "pmwlite.subtitle.radar_ping": "雷达扫描",
+  "pmwlite.subtitle.station_scan": "气象站扫描",
+  "pmwlite.subtitle.fortify_apply": "加固生效"
+}

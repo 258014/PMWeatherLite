@@ -63,6 +63,9 @@ public final class TornadoDestroyHandler {
         // One ambient-wind sample for the whole scan window (see class javadoc).
         Vec3 background = wind.backgroundWind(new Vec3(cx + 0.5, groundY, cz + 0.5), level.getGameTime());
         float rmw = Math.max(s.width * 0.5f, 4f);
+        // v0.2: reinforcement lookup is one hash probe per candidate block (0 when unused).
+        com.stellar.pmwlite.fortify.FortificationManager fortify =
+                com.stellar.pmwlite.fortify.FortificationManager.of(level);
 
         // sample a limited band around the funnel core for performance
         for (int dx = -3; dx <= 3; dx++) {
@@ -78,6 +81,15 @@ public final class TornadoDestroyHandler {
                     int threshold = cfg.strengthThreshold(state);
                     if (threshold < 0) continue; // blacklisted or unknown -> safe by default
 
+                    // v0.2: fixed assets may declare themselves immune (windThreshold() < 0);
+                    // everything else can be reinforced, which simply raises its threshold.
+                    if (state.getBlock() instanceof com.stellar.pmwlite.asset.IFixedAsset asset
+                            && asset.windThreshold() < 0) {
+                        continue;
+                    }
+                    int bonus = fortify.bonusAt(pos);
+                    if (bonus > 0) threshold += bonus;
+
                     Vec3 bp = new Vec3(x + 0.5, y + 0.5, z + 0.5);
                     Vec3 localWind = wind.getWind(bp, background, storms);
                     float windSpeed = (float) localWind.length() * 3.6f; // m/s -> mph-ish scale
@@ -85,6 +97,10 @@ public final class TornadoDestroyHandler {
 
                     // rip it up into a swirling falling block (1.20.1: FallingBlockEntity.fall)
                     level.destroyBlock(pos, false);
+                    if (bonus > 0) fortify.release(pos);
+                    if (state.getBlock() instanceof com.stellar.pmwlite.asset.IFixedAsset) {
+                        com.stellar.pmwlite.asset.FixedAssetManager.of(level).unregister(pos);
+                    }
                     FallingBlockEntity fb = FallingBlockEntity.fall(level, pos, state);
                     fb.setDeltaMovement(wind.rankineCirculation(s.position, bp,
                                     s.smoothWindspeed, rmw)

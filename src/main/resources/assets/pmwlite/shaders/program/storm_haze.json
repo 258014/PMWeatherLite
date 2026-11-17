@@ -1,0 +1,17 @@
+{
+  "blend": { "func": "add", "srcrgb": "one", "dstrgb": "zero" },
+  "vertex": "pmwlite:storm_haze",
+  "fragment": "pmwlite:storm_haze",
+  "samplers": [
+    { "name": "DiffuseSampler" }
+  ],
+  "uniforms": [
+    { "name": "OutSize", "type": "float", "count": 2, "values": [ 854.0, 480.0 ] },
+    { "name": "StormHaze", "type": "float", "count": 1, "values": [ 0.0 ] },
+    { "name": "Cold", "type": "float", "count": 1, "values": [ 0.0 ] },
+    { "name": "Flash", "type": "float", "count": 1, "values": [ 0.0 ] }
+  ],
+  "attributes": [
+    { "name": "Position" }
+  ]
+}

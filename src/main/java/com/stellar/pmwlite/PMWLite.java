@@ -2,16 +2,28 @@ package com.stellar.pmwlite;
 
 import com.mojang.logging.LogUtils;
 import org.slf4j.Logger;
+import com.stellar.pmwlite.asset.FixedAssetManager;
 import com.stellar.pmwlite.config.ServerConfig;
 import com.stellar.pmwlite.damage.TornadoDestroyHandler;
 import com.stellar.pmwlite.damage.WildfireSystem;
+import com.stellar.pmwlite.forecast.AlertManager;
+import com.stellar.pmwlite.forecast.ForecastEngine;
+import com.stellar.pmwlite.fortify.FortificationManager;
+import com.stellar.pmwlite.network.NetworkHandler;
+import com.stellar.pmwlite.radar.RadarService;
+import com.stellar.pmwlite.registry.ModRegistry;
 import com.stellar.pmwlite.render.WeatherStateBridge;
 import com.stellar.pmwlite.render.TornadoFX;
 import com.stellar.pmwlite.render.PrecipitationSystem;
 import com.stellar.pmwlite.weather.StormManager;
 import com.stellar.pmwlite.weather.WeatherSystem;
+import net.minecraft.ChatFormatting;
+import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.RegisterCommandsEvent;
@@ -30,14 +42,18 @@ import java.util.Map;
  * PMWeather Lite - independent Forge 1.20.1 reimplementation of PMWeather's storm
  * simulation, designed to coexist WITH shader packs (rendering delegated to Oculus/Iris).
  *
- * OPTIMIZATION v2:
- *  - Per-level state is cleaned on level unload (fixes HashMap leak across dimension unloads).
- *  - All 17 weather types from WeatherSystem are now wired into rendering/bridge/precipitation.
+ * v0.2 additions (all additive; nothing in the v0.1 public surface changed):
+ *  - registry (sounds / weather station block / reinforcement kit),
+ *  - radar network channel + {@link RadarService},
+ *  - {@link AlertManager} forecast alerts,
+ *  - {@link FixedAssetManager} / {@link FortificationManager} per-level state with cleanup.
  */
 @Mod(PMWLite.MOD_ID)
 public class PMWLite {
     public static final String MOD_ID = "pmwlite";
     public static final Logger LOGGER = LogUtils.getLogger();
+
+    private static PMWLite instance;
 
     private final ServerConfig config = new ServerConfig();
     private final Map<ServerLevel, StormManager> managers = new HashMap<>();
@@ -47,13 +63,42 @@ public class PMWLite {
     private final TornadoFX tornadoFX = new TornadoFX();
     private final PrecipitationSystem precipitation = new PrecipitationSystem();
     private final WildfireSystem wildfire = new WildfireSystem();
+    private final AlertManager alertManager = new AlertManager();
     private boolean initialized = false;
 
     public PMWLite() {
+        instance = this;
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
         IEventBus forgeBus = MinecraftForge.EVENT_BUS;
+
+        ModRegistry.init(modBus);
+        NetworkHandler.init();
+
         forgeBus.register(this);
         LOGGER.info("PMWeather Lite initialized (storm physics; rendering delegated to shader packs)");
+    }
+
+    /** Mod singleton, or null before construction (e.g. from a data-pack load hook). */
+    public static PMWLite instance() {
+        return instance;
+    }
+
+    /** Per-dimension storm simulation, created on demand; never null for a live level. */
+    public StormManager stormManager(ServerLevel level) {
+        return managers.computeIfAbsent(level, l -> new StormManager(l, config));
+    }
+
+    /** Per-dimension weather-event simulation, created on demand. */
+    public WeatherSystem weatherSystem(ServerLevel level) {
+        return weatherSystems.computeIfAbsent(level, l -> new WeatherSystem(l, config));
+    }
+
+    public AlertManager alerts() {
+        return alertManager;
+    }
+
+    public ServerConfig config() {
+        return config;
     }
 
     @SubscribeEvent
@@ -69,13 +114,17 @@ public class PMWLite {
         if (!(event.getLevel() instanceof ServerLevel sl)) return;
         managers.remove(sl);
         weatherSystems.remove(sl);
+        FixedAssetManager.clear(sl);
+        ForecastEngine.clear(sl);
+        FortificationManager.clear(sl);
     }
 
     /** Clear per-player sound state on logout (bounded memory). */
     @SubscribeEvent
     public void onPlayerLogout(net.minecraftforge.event.entity.player.PlayerEvent.PlayerLoggedOutEvent event) {
-        if (event.getEntity() instanceof net.minecraft.server.level.ServerPlayer sp) {
+        if (event.getEntity() instanceof ServerPlayer sp) {
             com.stellar.pmwlite.sound.SoundManager.forget(sp.getUUID());
+            alertManager.forget(sp.getUUID());
         }
     }
 
@@ -85,8 +134,8 @@ public class PMWLite {
         var server = net.minecraftforge.server.ServerLifecycleHooks.getCurrentServer();
         if (server == null) return;
         for (ServerLevel level : server.getAllLevels()) {
-            StormManager manager = managers.computeIfAbsent(level, l -> new StormManager(l, config));
-            WeatherSystem weather = weatherSystems.computeIfAbsent(level, l -> new WeatherSystem(l, config));
+            StormManager manager = stormManager(level);
+            WeatherSystem weather = weatherSystem(level);
             manager.tick();
             weather.tick();
             destroyHandler.tick(level, manager);
@@ -94,6 +143,7 @@ public class PMWLite {
             tornadoFX.tick(level, manager);
             precipitation.tick(level, manager, weather);
             wildfire.tick(level, manager);
+            alertManager.tick(level, manager);
         }
     }
 
@@ -104,7 +154,7 @@ public class PMWLite {
                 .requires(src -> src.hasPermission(2))
                 .then(net.minecraft.commands.Commands.literal("summon").executes(ctx -> {
                     ServerLevel level = ctx.getSource().getLevel();
-                    StormManager m = managers.computeIfAbsent(level, l -> new StormManager(l, config));
+                    StormManager m = stormManager(level);
                     Vec3 p = ctx.getSource().getPosition();
                     StormManager.summonAt(m, p);
                     // audio + text feedback
@@ -127,7 +177,7 @@ public class PMWLite {
                                 })
                                 .executes(ctx -> {
                                     ServerLevel level = ctx.getSource().getLevel();
-                                    WeatherSystem ws = weatherSystems.computeIfAbsent(level, l -> new WeatherSystem(l, config));
+                                    WeatherSystem ws = weatherSystem(level);
                                     String raw = com.mojang.brigadier.arguments.StringArgumentType.getString(ctx, "type");
                                     var src = ctx.getSource().getPlayer();
                                     try {
@@ -209,14 +259,107 @@ public class PMWLite {
                 }))
                 .then(net.minecraft.commands.Commands.literal("clear").executes(ctx -> {
                     ServerLevel level = ctx.getSource().getLevel();
-                    StormManager m = managers.computeIfAbsent(level, l -> new StormManager(l, config));
-                    WeatherSystem ws = weatherSystems.computeIfAbsent(level, l -> new WeatherSystem(l, config));
+                    StormManager m = stormManager(level);
+                    WeatherSystem ws = weatherSystem(level);
                     m.getStorms().clear();
                     ws.clearAll();
                     var src = ctx.getSource().getPlayer();
                     if (src != null) com.stellar.pmwlite.sound.SoundManager.playUi(src,
                             com.stellar.pmwlite.sound.SoundManager.Sfx.CLEAR, 0.7f, 1.0f);
                     ctx.getSource().sendSuccess(() -> Component.literal("§a[PMWLite] 已清除全部天气与风暴。"), true);
+                    return 1;
+                }))
+                // ---------------- v0.2: forecast / radar / fortification / assets ----------------
+                .then(net.minecraft.commands.Commands.literal("forecast").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    BlockPos at = src != null ? src.blockPosition() : BlockPos.containing(ctx.getSource().getPosition());
+                    ServerLevel level = ctx.getSource().getLevel();
+                    var f = ForecastEngine.forecast(level, at, managers.get(level));
+                    StringBuilder sb = new StringBuilder("§6[PMWLite] 预报 §7@ ")
+                            .append(at.getX()).append(", ").append(at.getZ()).append("\n");
+                    sb.append(f.colorCode()).append(f.headline()).append("\n");
+                    sb.append("§7风险 §f").append(String.format("%.2f", f.risk()))
+                            .append(" §8| §7置信 §f").append(f.confidence()).append("%")
+                            .append(f.precise() ? " §b(气象站精报)" : " §8(粗略)").append("\n");
+                    if (f.etaSeconds() >= 0) {
+                        sb.append("§7预计 §f").append(f.etaSeconds()).append("s §7后影响本地\n");
+                    }
+                    if (!f.expectedTypes().isEmpty()) {
+                        sb.append("§7可能: §f").append(String.join("、", f.expectedTypes())).append("\n");
+                    }
+                    String text = sb.toString();
+                    ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("radar").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    if (src == null) {
+                        ctx.getSource().sendFailure(Component.literal("§c[PMWLite] 该命令只能由玩家执行。"));
+                        return 0;
+                    }
+                    RadarService.sendTo(src);
+                    ctx.getSource().sendSuccess(() -> Component.literal(
+                            "§a[PMWLite] 雷达数据已发送 §7(按 §fR §7随时打开)"), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("reinforce").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    if (src == null) {
+                        ctx.getSource().sendFailure(Component.literal("§c[PMWLite] 该命令只能由玩家执行。"));
+                        return 0;
+                    }
+                    // 6-block raycast: same target the player is aiming at, no client input needed.
+                    HitResult hit = src.pick(6.0D, 1.0F, false);
+                    if (!(hit instanceof BlockHitResult bhr) || bhr.getType() != HitResult.Type.BLOCK) {
+                        ctx.getSource().sendFailure(Component.literal(
+                                "§c[PMWLite] 请先瞄准一个方块（6 格内）"));
+                        return 0;
+                    }
+                    BlockPos pos = bhr.getBlockPos();
+                    FortificationManager fg = FortificationManager.of(src.serverLevel());
+                    int before = fg.bonusAt(pos);
+                    int after = fg.fortify(pos);
+                    if (after < 0) {
+                        ctx.getSource().sendFailure(Component.literal(before >= FortificationManager.MAX_BONUS
+                                ? "§e[PMWLite] 该方块已达加固上限 §7(+" + before + ")"
+                                : "§c[PMWLite] 本维度加固数量已达上限"));
+                        return 0;
+                    }
+                    ctx.getSource().sendSuccess(() -> Component.literal("§a[PMWLite] 已加固 §f"
+                            + pos.toShortString() + " §7抗风阈值 " + before + " → §f" + after), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("assets").executes(ctx -> {
+                    ServerLevel level = ctx.getSource().getLevel();
+                    FixedAssetManager am = FixedAssetManager.of(level);
+                    BlockPos at = BlockPos.containing(ctx.getSource().getPosition());
+                    StringBuilder sb = new StringBuilder("§6[PMWLite] 固定资产§r\n");
+                    sb.append("§7已登记: §f").append(am.size()).append(" §8/ ")
+                            .append(FixedAssetManager.MAX_ASSETS).append("\n");
+                    sb.append("§7本站覆盖: ")
+                            .append(am.coveredByStation(at) ? "§a精报已启用" : "§8无气象站覆盖").append("\n");
+                    sb.append("§7已加固方块: §f").append(FortificationManager.of(level).reinforcedCount()).append("\n");
+                    var near = am.stationsNear(at, FixedAssetManager.STATION_COVERAGE);
+                    if (!near.isEmpty()) {
+                        sb.append("§7附近气象站:\n");
+                        int shown = 0;
+                        for (var a : near) {
+                            if (shown++ >= 5) break;
+                            sb.append("  §b").append(a.kind()).append(" §7@ ")
+                                    .append(a.pos().toShortString()).append("\n");
+                        }
+                    }
+                    String text = sb.toString();
+                    ctx.getSource().sendSuccess(() -> Component.literal(text), false);
+                    return 1;
+                }))
+                .then(net.minecraft.commands.Commands.literal("hint").executes(ctx -> {
+                    var src = ctx.getSource().getPlayer();
+                    if (src == null) return 0;
+                    src.sendSystemMessage(Component.literal(ChatFormatting.GOLD + "[PMWLite] 快捷操作"));
+                    src.sendSystemMessage(Component.literal("§7按 §fR §7打开气象雷达"));
+                    src.sendSystemMessage(Component.literal("§7/item 获取气象站与加固套件（创造模式物品栏）"));
+                    src.sendSystemMessage(Component.literal("§7/pmwlite forecast §8预报 · §7/pmwlite reinforce §8瞄准加固"));
                     return 1;
                 })));
     }
