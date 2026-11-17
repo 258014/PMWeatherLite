@@ -1,0 +1,36 @@
+# ---- Gradle ----
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ---- 运行时 / 开发环境 ----
+run/
+runs/
+logs/
+crash-reports/
+
+# ---- IDE ----
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+.vscode/
+.eclipse/
+.settings/
+.classpath
+.project
+bin/
+
+# ---- 构建日志 ----
+build*.log
+*.log
+
+# ---- 系统 ----
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# ---- 其它 ----
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

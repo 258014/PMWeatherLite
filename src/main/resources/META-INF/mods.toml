@@ -1,0 +1,29 @@
+modLoader="javafml"
+loaderVersion="[47,)"
+license="ARR - independent reimplementation, see README"
+
+[[mods]]
+modId="pmwlite"
+version="${file.jarVersion}"
+displayName="PMWeather Lite (Stellar Reimplementation)"
+credits="Algorithm reference: ProtoManly's Weather by ProtoManly (ARR). Reimplemented independently."
+authors="stellar"
+description='''
+A Forge 1.20.1 reimplementation of the storm physics / thermodynamic weather simulation,
+designed to coexist WITH shader packs (Oculus/Iris). Rendering of clouds is delegated to the
+shader pack; this mod only simulates storms, wind, temperature and tornado destruction.
+'''
+
+[[dependencies.pmwlite]]
+modId="forge"
+mandatory=true
+versionRange="[47,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.pmwlite]]
+modId="minecraft"
+mandatory=true
+versionRange="[1.20.1,1.21)"
+ordering="NONE"
+side="BOTH"

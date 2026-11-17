@@ -1,0 +1,132 @@
+package com.stellar.pmwlite.render;
+
+import com.stellar.pmwlite.weather.StormManager;
+import com.stellar.pmwlite.weather.Thermodynamics;
+import com.stellar.pmwlite.weather.WeatherSystem;
+import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.ParticleTypes;
+import net.minecraft.server.level.ServerLevel;
+import net.minecraft.util.Mth;
+import net.minecraft.world.phys.Vec3;
+
+/**
+ * Extreme-weather precipitation FX, rendered with VANILLA particles so Oculus/Iris
+ * shader packs light them correctly (no post-processing pipeline hijack).
+ *
+ * OPTIMIZATION v2:
+ *  - Phase (which depends on an expensive thermodynamic profile) is now cached per
+ *    coarse 64-block cell and refreshed only every ~5 seconds, instead of a full
+ *    buildProfile() for every player every 2 ticks.
+ *  - Particle count scales down when many players are nearby (crowd guard).
+ *  - Also consumes WeatherSystem weather types so 17-type precipitation shows up.
+ *
+ * OPTIMIZATION v4 (algorithm + memory):
+ *  - Phase cache switched from {@code HashMap<Long, PhaseCache>} to a primitive-keyed
+ *    {@link Long2ObjectOpenHashMap}: no Long boxing per lookup, no HashMap.Node per cell.
+ *  - Biome is resolved ONCE per cell instead of twice (surfaceTemp + surfaceDew each
+ *    called level.getBiome(BlockPos.containing(...))), removing a BlockPos allocation
+ *    and a chunk-biome lookup per query.
+ *  - Emit loop caches the random source and the emission origin, avoiding repeated
+ *    field hops and Vec3 math per particle.
+ */
+public final class PrecipitationSystem {
+    private int tick = 0;
+
+    /** Cached precipitation phase per 64-block column: key = (cellX << 32) ^ cellZ. */
+    private final Long2ObjectOpenHashMap<PhaseCache> phaseCache = new Long2ObjectOpenHashMap<>(64);
+
+    private static final class PhaseCache {
+        final Thermodynamics.Precipitation phase;
+        final long expiry;
+        PhaseCache(Thermodynamics.Precipitation p, long e) { phase = p; expiry = e; }
+    }
+
+    public void tick(ServerLevel level, StormManager manager, WeatherSystem weather) {
+        if (++tick % 2 != 0) return;
+        if (level.players().isEmpty()) return;
+        long now = level.getGameTime();
+
+        // Crowd guard: emit fewer particles per player when the server is busy
+        int players = level.players().size();
+        int countScale = players > 8 ? 2 : (players > 3 ? 3 : 4);
+
+        for (var player : level.players()) {
+            Vec3 p = player.position();
+            float intensity = Math.max(manager.precipitationAt(p),
+                    weather == null ? 0f : weather.precipitationAt(p));
+            if (intensity < 0.12f) continue;
+
+            Thermodynamics.Precipitation phase = cachedPhase(level, manager, p, now);
+            if (phase == Thermodynamics.Precipitation.NONE) continue;
+            emitAround(level, p, intensity, phase, countScale);
+        }
+
+        // Prune stale cache entries periodically (bounded memory)
+        if (tick % 600 == 0) {
+            var it = phaseCache.long2ObjectEntrySet().iterator();
+            while (it.hasNext()) {
+                if (it.next().getValue().expiry < now) it.remove();
+            }
+        }
+    }
+
+    /** Returns the precipitation phase for a position, cached per 64-block cell for ~5 s. */
+    private Thermodynamics.Precipitation cachedPhase(ServerLevel level, StormManager manager, Vec3 p, long now) {
+        long cx = Math.floorDiv((int) p.x, 64);
+        long cz = Math.floorDiv((int) p.z, 64);
+        long key = (cx << 32) ^ (cz & 0xffffffffL);
+        PhaseCache c = phaseCache.get(key);
+        if (c != null && c.expiry > now) return c.phase;
+
+        // v4: sample the biome once and reuse it for both temperature and downfall.
+        var biome = level.getBiome(BlockPos.containing(p)).value();
+        float temp = surfaceTemp(biome.getBaseTemperature());
+        float dew = surfaceDew(biome.getModifiedClimateSettings().downfall(), temp);
+
+        Thermodynamics.Profile profile = Thermodynamics.buildProfile(manager.getNoise(), p, temp, dew, 1013.25f,
+                level.getSeaLevel(), now, 500, 8000);
+        Thermodynamics.Precipitation phase = Thermodynamics.precipitationType(profile);
+        phaseCache.put(key, new PhaseCache(phase, now + 100)); // 5 s @ 20 tps
+        return phase;
+    }
+
+    private void emitAround(ServerLevel level, Vec3 center, float intensity,
+                            Thermodynamics.Precipitation phase, int countScale) {
+        int count = (int) (4 + intensity * 12) / countScale + 2;
+        double radius = 14;
+        var random = level.random;                 // v4: single field hop instead of per-particle
+        var type = switch (phase) {
+            case SNOW, WINTRY_MIX -> ParticleTypes.SNOWFLAKE;
+            case SLEET, FREEZING_RAIN -> ParticleTypes.SPLASH;
+            case RAIN -> ParticleTypes.RAIN;
+            default -> null;
+        };
+        if (type == null) return;
+
+        // Vertical drift and speed per phase, resolved once (values unchanged from v3).
+        double dy;
+        double speed;
+        switch (phase) {
+            case SNOW, WINTRY_MIX -> { dy = -0.15; speed = 0.01; }
+            case SLEET, FREEZING_RAIN -> { dy = -0.6; speed = 0.001; }
+            default -> { dy = -1.0; speed = 0.001; }
+        }
+
+        for (int i = 0; i < count; i++) {
+            double dx = (random.nextDouble() - 0.5) * radius * 2;
+            double dz = (random.nextDouble() - 0.5) * radius * 2;
+            double y = center.y + 8 + random.nextDouble() * 18;
+            level.sendParticles(type, center.x + dx, y, center.z + dz, 1, 0, dy, 0, speed);
+        }
+    }
+
+    private static float surfaceTemp(float bt) {
+        return bt > 0 ? (float) Math.pow(bt / 1.85, 0.5) * 35f : -(float) Math.pow(-bt, 1.5) * 60f;
+    }
+
+    private static float surfaceDew(float downfall, float temp) {
+        float humidity = Mth.clamp(downfall, 0, 1);
+        return temp - (1 - humidity) * 15f;
+    }
+}
