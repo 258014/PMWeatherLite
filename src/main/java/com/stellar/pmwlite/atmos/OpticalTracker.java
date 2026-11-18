@@ -59,7 +59,18 @@ public final class OpticalTracker {
         input.pm = probe.gases[GasField.PM];
         input.co2 = probe.co2;
         input.underground = probe.underground;
-        input.sunAltitudeDeg = OpticalField.sunAltitude(level.getDayTime());
+        long dayTime = level.getDayTime();
+        input.sunAltitudeDeg = OpticalField.sunAltitude(dayTime);
+
+        // v0.3.4：降水、逆温代理、月亮状态。
+        // 逆温用"空气比露点干很多 + 天空通透"作代理：晴朗静稳夜最容易形成辐射逆温，
+        // 这是法塔莫甘娜的必要条件；不到 4℃ 时求解器直接给 0。
+        input.rain = level.getRainLevel(1f);
+        input.inversionC = Mth.clamp((probe.tempC - probe.dewPointC) * 0.55f
+                * clamp01(1f - probe.cloud), 0f, 12f);
+        input.moonAltitudeDeg = LunarField.altitudeDeg(dayTime);
+        input.moonIllum = LunarField.illumination(dayTime);
+        input.moonEclipse = LunarField.eclipse(dayTime);
 
         // 艺术化代理量
         input.geomagneticLat = Mth.clamp((float) Math.abs(pos.z) / 24f, 0f, 90f);
@@ -112,6 +123,10 @@ public final class OpticalTracker {
         current.artistic = artistic;
         current.durationSec = dominant == OpticalField.Kind.NONE ? 0 : duration[dominant.ordinal()];
         current.phase = phase;
+    }
+
+    private static float clamp01(float v) {
+        return v < 0f ? 0f : (v > 1f ? 1f : v);
     }
 
     /** 风暴系统的只读视图（解耦，避免 OpticalTracker 直接依赖 StormManager）。 */

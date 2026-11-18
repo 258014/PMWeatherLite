@@ -57,6 +57,10 @@ public final class AtmosphereManager {
     private final float[] surfaceWindBuf = new float[2];
     /** 每个玩家的低氧伤害计时，避免每 tick 都扣血。 */
     private final Map<java.util.UUID, Integer> damageCooldown = new HashMap<>();
+    /** 每个玩家的污染伤害计时（与低氧分开，避免一种伤害吃掉另一种的冷却）。 */
+    private final Map<java.util.UUID, Integer> exposureCooldown = new HashMap<>();
+    /** 复用的联合暴露结果，1 Hz 每玩家一次，零分配。 */
+    private final GasExposure.Result exposureBuf = new GasExposure.Result();
 
     private int tick;
     private boolean loggedOnce;
@@ -67,6 +71,7 @@ public final class AtmosphereManager {
         this.grid = new AtmosphereGrid(level);
         this.grid.configure(cfg.co2System, cfg.machineEmissions);
         this.grid.configureGases(cfg.gasField && cfg.co2System);
+        this.grid.gases().configureWetDeposition(cfg.wetDeposition);
         this.optics.setEnabled(cfg.opticsSystem);
         this.global = new GlobalModel(level);
     }
@@ -191,7 +196,8 @@ public final class AtmosphereManager {
 
     /** 低氧后果：先给挖掘疲劳，再给缓慢伤害。数值只做提示，不做惩罚性秒杀。 */
     private void effectTick() {
-        if ((!cfg.oxygenEffects && !cfg.co2HealthEffects) || level.players().isEmpty()) return;
+        boolean anyEffects = cfg.oxygenEffects || cfg.co2HealthEffects || cfg.multiGasEffects;
+        if (!anyEffects || level.players().isEmpty()) return;
         for (ServerPlayer p : level.players()) {
             var probe = new AtmosphereGrid.Probe();
             if (!grid.probe(p.getX(), p.getEyeY(), p.getZ(), probe)) continue;
@@ -212,9 +218,15 @@ public final class AtmosphereManager {
                 damageCooldown.remove(p.getUUID());
             }
 
-            // CO₂ 中毒：复用原版 effect，与 PoT 的碳污染分级对齐。
-            // 注意用 hideParticles=false 的短时效果，离开污染区后会自然消退。
-            if (cfg.co2HealthEffects && probe.co2 >= CO2_FATIGUE) {
+            // 多气体联合暴露：CO₂ + SO₂/NO₂/CO/PM 一起判定，含协同与湿沉降。
+            // 关掉 multiGasEffects 时退回 v0.3.3 的单一 CO₂ 路径，行为完全兼容。
+            if (cfg.multiGasEffects && (cfg.gasField || cfg.co2System)) {
+                float rain = cfg.wetDeposition ? level.getRainLevel(1f) : 0f;
+                GasExposure.fromProbe(probe, rain, exposureBuf);
+                applyExposure(p, exposureBuf);
+            } else if (cfg.co2HealthEffects && probe.co2 >= CO2_FATIGUE) {
+                // CO₂ 中毒：复用原版 effect，与 PoT 的碳污染分级对齐。
+                // 短时效果，离开污染区后会自然消退。
                 p.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 80, 0, true, false, false));
                 if (probe.co2 >= CO2_WEAK) {
                     p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 0, true, false, false));
@@ -232,5 +244,54 @@ public final class AtmosphereManager {
         if (damageCooldown.size() > 256) {
             damageCooldown.keySet().retainAll(level.players().stream().map(ServerPlayer::getUUID).toList());
         }
+        if (exposureCooldown.size() > 256) {
+            exposureCooldown.keySet().retainAll(level.players().stream().map(ServerPlayer::getUUID).toList());
+        }
+    }
+
+    /**
+     * 把联合暴露等级翻译成原版效果。全部使用短时、隐藏粒子的效果，
+     * 离开污染区 4 秒内自然消退；只有"危险"级才扣血，且带 2 秒冷却。
+     */
+    private void applyExposure(ServerPlayer p, GasExposure.Result e) {
+        switch (e.grade) {
+            case MILD -> p.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 80, 0, true, false, false));
+            case MODERATE -> {
+                p.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 80, 0, true, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 0, true, false, false));
+                if (e.dominant == GasExposure.CO || e.dominant == GasExposure.CO2) {
+                    p.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 60, 0, true, false, false));
+                }
+            }
+            case SEVERE -> {
+                p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 0, true, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 80, 0, true, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 60, 0, true, false, false));
+                if (e.dominant == GasExposure.CO || e.dominant == GasExposure.CO2
+                        || e.dominant == GasExposure.PM) {
+                    p.addEffect(new MobEffectInstance(MobEffects.POISON, 80, 0, true, false, false));
+                }
+            }
+            case CRITICAL -> {
+                p.addEffect(new MobEffectInstance(MobEffects.WITHER, 60, 0, true, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 60, 0, true, false, false));
+                p.addEffect(new MobEffectInstance(MobEffects.POISON, 80, 0, true, false, false));
+                int cd = exposureCooldown.getOrDefault(p.getUUID(), 0);
+                if (cd <= 0) {
+                    p.hurt(p.damageSources().drown(), 1.0f);
+                    exposureCooldown.put(p.getUUID(), 40);
+                } else {
+                    exposureCooldown.put(p.getUUID(), cd - 20);
+                }
+            }
+            default -> { /* 无风险：不施加任何效果 */ }
+        }
+        if (e.grade != GasExposure.Grade.CRITICAL) exposureCooldown.remove(p.getUUID());
+    }
+
+    /** 供 HUD/雷达读取当前联合暴露（使用共享探针，单线程）。 */
+    public GasExposure.Result exposureShared(GasExposure.Result out) {
+        float rain = cfg.wetDeposition ? level.getRainLevel(1f) : 0f;
+        return GasExposure.fromProbe(sharedProbe, rain, out);
     }
 }

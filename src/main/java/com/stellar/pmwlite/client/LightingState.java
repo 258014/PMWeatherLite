@@ -1,5 +1,6 @@
 package com.stellar.pmwlite.client;
 
+import com.stellar.pmwlite.atmos.LunarField;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.util.Mth;
@@ -46,6 +47,15 @@ public final class LightingState {
     /** 环境色（原版天空色）。 */
     public static float ambR = 0.6f, ambG = 0.7f, ambB = 0.9f;
 
+    // 月亮 / v0.3.4（只读快照，由 LunarField + 服务端光学包共同驱动）
+    /** 世界空间指向月亮的单位向量（与太阳相反）。 */
+    public static float moonX = -1f, moonY = 0f, moonZ = 0f;
+    /** 相机空间月亮向量；z>0 表示月亮在镜头前方。 */
+    public static float screenMoonX = 0f, screenMoonY = 0f, screenMoonFacing = -1f;
+    /** 月相 0..7（0=满月，4=新月），照度 0..1，月食 0..1，可用月光 0..1。 */
+    public static int moonPhase = 0;
+    public static float moonIllum = 0f, moonEclipse = 0f, moonlight = 0f;
+
     // 阴影（屏幕空间幕参数）
     /** 阴影幕强度 0..0.85：晴天正午最强，雷暴天被云摊薄。 */
     public static float shadowStrength = 0.4f;
@@ -85,6 +95,22 @@ public final class LightingState {
         sunX = sx;
         sunY = sy;
         sunZ = 0f;
+        // 月亮与太阳严格对置；相/照度优先用服务端同源读数，未同步时用本地纯函数兜底。
+        moonX = -sx;
+        moonY = -sy;
+        moonZ = 0f;
+        long dayTime = level.getDayTime();
+        if (ClientVisualState.moonSynced()) {
+            moonPhase = ClientVisualState.moonPhase();
+            moonIllum = ClientVisualState.moonIllum();
+            moonEclipse = ClientVisualState.moonEclipse();
+            moonlight = ClientVisualState.moonlight();
+        } else {
+            moonPhase = LunarField.phaseIndex(dayTime);
+            moonIllum = LunarField.illumination(dayTime);
+            moonEclipse = LunarField.eclipse(dayTime);
+            moonlight = LunarField.moonlight(dayTime, rain, level.getRainLevel(1f));
+        }
 
         daylight = Mth.clamp(1f - level.getSkyDarken(partialTick), 0f, 1f);
         dusk = Mth.clamp(1f - Math.abs(sy) / 0.40f, 0f, 1f) * daylight;
@@ -104,7 +130,10 @@ public final class LightingState {
         ambG = Mth.clamp((float) sky.y, 0f, 1f);
         ambB = Mth.clamp((float) sky.z, 0f, 1f);
         float skyLuma = (ambR + ambG + ambB) / 3f;
-        ambient = Mth.clamp((0.22f + skyLuma * 0.78f) * (0.55f + daylight * 0.45f), 0f, 1f);
+        // 月光照明：只在夜间补一点冷色环境光；白昼 contribution 被 (1−daylight) 压到 0，
+        // 因此不会改变现有白天的亮度标定，也不写光影包 uniform。
+        ambient = Mth.clamp((0.22f + skyLuma * 0.78f) * (0.55f + daylight * 0.45f)
+                + moonlight * 0.18f * (1f - daylight * 0.85f), 0f, 1f);
 
         // 阴影：晴天锐利，低太阳角/降水软化并摊薄
         shadowStrength = Mth.clamp(0.12f + 0.55f * sunlight, 0f, 0.85f);
@@ -123,6 +152,13 @@ public final class LightingState {
         screenSunX = Mth.clamp((float) sun.dot(right), -1f, 1f);
         screenSunY = Mth.clamp((float) sun.dot(up), -1f, 1f);
         screenSunFacing = Mth.clamp((float) sun.dot(forward), -1f, 1f);
+        // 月亮的相机空间投影（手写点积，避免每 tick 再 new 一个 Vec3）
+        screenMoonX = Mth.clamp(moonX * (float) right.x + moonY * (float) right.y
+                + moonZ * (float) right.z, -1f, 1f);
+        screenMoonY = Mth.clamp(moonX * (float) up.x + moonY * (float) up.y
+                + moonZ * (float) up.z, -1f, 1f);
+        screenMoonFacing = Mth.clamp(moonX * (float) forward.x + moonY * (float) forward.y
+                + moonZ * (float) forward.z, -1f, 1f);
         shadowOffsetX = -screenSunX * 0.006f;
         shadowOffsetY = -screenSunY * 0.006f;
     }
@@ -131,6 +167,9 @@ public final class LightingState {
     public static void reset() {
         sunX = 1f; sunY = 0f; sunZ = 0f;
         screenSunX = 0f; screenSunY = 0f; screenSunFacing = 1f;
+        moonX = -1f; moonY = 0f; moonZ = 0f;
+        screenMoonX = 0f; screenMoonY = 0f; screenMoonFacing = -1f;
+        moonPhase = 0; moonIllum = 0f; moonEclipse = 0f; moonlight = 0f;
         sunlight = 0f;
         ambient = 1f;
         sunR = 1f; sunG = 0.98f; sunB = 0.92f;
@@ -148,9 +187,11 @@ public final class LightingState {
         return String.format(
                 "日光 §f%.0f%% §7(%0.2f,%0.2f,%0.2f)  §7环境 §f%.0f%%  §7晨昏 §f%.0f%%%n"
                         + "§7阴影 强度 §f%.2f §7软化 §f%.2f §7网格 §f%.0f §7偏移 §f(%+.3f,%+.3f)%n"
-                        + "§7太阳 世界 §f(%.2f,%.2f) §7屏幕 §f(%.2f,%.2f,%+.2f)",
+                        + "§7太阳 世界 §f(%.2f,%.2f) §7屏幕 §f(%.2f,%.2f,%+.2f)%n"
+                        + "§7月亮 相 §f%d §7照度 §f%.0f%% §7月光 §f%.0f%% §7食 §f%.0f%%",
                 sunlight * 100f, sunR, sunG, sunB, ambient * 100f, dusk * 100f,
                 shadowStrength, shadowSoftness, shadowResolution, shadowOffsetX, shadowOffsetY,
-                sunX, sunY, screenSunX, screenSunY, screenSunFacing);
+                sunX, sunY, screenSunX, screenSunY, screenSunFacing,
+                moonPhase, moonIllum * 100f, moonlight * 100f, moonEclipse * 100f);
     }
 }

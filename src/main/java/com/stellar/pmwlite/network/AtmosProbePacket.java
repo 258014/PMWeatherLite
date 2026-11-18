@@ -20,7 +20,8 @@ public record AtmosProbePacket(
         float pressureHpa, float tempC, float humidity, float oxygen,
         float windSpeed, float apparentC, float dewPointC, float cloudBaseM,
         float cloud, float groundT, float co2,
-        float so2, float no2, float co, float pm) {
+        float so2, float no2, float co, float pm,
+        float exposure, int exposureGrade, float visibility) {
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(valid);
@@ -40,6 +41,10 @@ public record AtmosProbePacket(
         buf.writeFloat(no2);
         buf.writeFloat(co);
         buf.writeFloat(pm);
+        // v0.3.4：多气体联合暴露，供 HUD 显示"谁在起作用"，与服务端判定同源
+        buf.writeFloat(exposure);
+        buf.writeVarInt(exposureGrade);
+        buf.writeFloat(visibility);
     }
 
     public static AtmosProbePacket decode(FriendlyByteBuf buf) {
@@ -47,7 +52,8 @@ public record AtmosProbePacket(
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat());
+                buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
+                buf.readFloat(), buf.readVarInt(), buf.readFloat());
     }
 
     public static void handle(AtmosProbePacket msg, Supplier<NetworkEvent.Context> ctx) {

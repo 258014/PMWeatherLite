@@ -325,8 +325,9 @@ public final class AtmosphereGrid {
         project();
         relaxMoisture(dt, rainLevel);
         clampFields();
-        // 多气体列场在体场之后推进：此时风场已投影完成，羽流沿同一条风路走
-        gases.step(gameTime);
+        // 多气体列场在体场之后推进：此时风场已投影完成，羽流沿同一条风路走；
+        // 同一个 rainLevel 也传给列场做湿沉降，确保"显示下雨"与"污染被洗掉"同源。
+        gases.step(gameTime, rainLevel);
     }
 
     /** 滚动刷新火源列：每步只看 32 列，8 步扫完一遍。 */

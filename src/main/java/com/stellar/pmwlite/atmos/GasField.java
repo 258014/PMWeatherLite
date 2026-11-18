@@ -52,6 +52,8 @@ public final class GasField {
     private final float[][] src = new float[COUNT][];
     private int cursor = 0;
     private boolean enabled = true;
+    /** 湿沉降开关（ServerConfig.wetDeposition）；关闭后降雨不再洗出污染物。 */
+    private boolean wetDeposition = true;
 
     public GasField(ServerLevel level, AtmosphereGrid grid) {
         this.level = level;
@@ -61,6 +63,11 @@ public final class GasField {
             cN[g] = new float[cols];
             src[g] = new float[cols];
         }
+    }
+
+    /** 湿沉降开关；由 AtmosphereManager 根据 ServerConfig 注入。 */
+    public void configureWetDeposition(boolean enabled) {
+        this.wetDeposition = enabled;
     }
 
     /** 总开关：关闭后不再检测排放、平流，读数维持背景。 */
@@ -131,11 +138,38 @@ public final class GasField {
      * 在平流之后调用——此时最新鲜的风场已经就绪。
      */
     public void step(long gameTime) {
+        step(gameTime, 0f);
+    }
+
+    /**
+     * 推进一步，并施加湿沉降（降水洗出）。
+     *
+     * 湿沉降速率按气体溶解度差异取值：SO₂ 易溶、NO₂ 中等、颗粒物被雨滴捕获、
+     * CO 难溶（几乎不被雨水清除）。这是多气体风险模型"下雨时同样排放危害更低"的物理来源。
+     *
+     * @param rain 0..1 降水强度
+     */
+    public void step(long gameTime, float rain) {
         if (!enabled || !grid.ready()) return;
         scanSources();
         applySources();
         advect2D();
+        washout(wetDeposition ? rain : 0f);
         clampFields();
+    }
+
+    /** 湿沉降：c ← background + (c − background)·exp(−k·rain·dt)。 */
+    private void washout(float rain) {
+        float r = Mth.clamp(rain, 0f, 1f);
+        if (r <= 0f) return;
+        // 时间常数 180 s；颗粒物和 SO₂ 洗出最快，NO₂ 次之，CO 几乎不溶。
+        final float[] K = {6.75f / 150f, 6.75f / 260f, 6.75f / 2400f, 6.75f / 120f};
+        for (int g = 0; g < COUNT; g++) {
+            float keep = (float) Math.exp(-K[g] * r);
+            for (int i = 0; i < cols; i++) {
+                c[g][i] = BACKGROUND[g] + (c[g][i] - BACKGROUND[g]) * keep;
+            }
+        }
     }
 
     /** 滚动扫描地表方块，把机器/火山排放平滑写入 src。 */

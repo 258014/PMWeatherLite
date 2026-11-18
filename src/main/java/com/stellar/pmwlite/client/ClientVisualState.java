@@ -1,5 +1,7 @@
 package com.stellar.pmwlite.client;
 
+import com.stellar.pmwlite.atmos.GasExposure;
+import com.stellar.pmwlite.atmos.OpticalField;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ClientLevel;
 import net.minecraft.core.BlockPos;
@@ -30,7 +32,19 @@ public final class ClientVisualState {
     private static volatile int opticsKind = 0;
     private static volatile boolean opticsArtistic = false;
     private static volatile int opticsDuration = 0;
-    private static volatile float parhelion = 0f, halo = 0f, fogbow = 0f, afterglow = 0f, aurora = 0f;
+    /**
+     * v0.3.4：所有现象强度放在一个数组里，网络线程写入时**整体替换引用**，
+     * 渲染线程只读一次局部引用，避免 22 个 float 被读到"半旧半新"的撕裂状态。
+     */
+    private static volatile float[] opticsStrength = new float[OpticalField.KIND_COUNT];
+    /** 月亮状态（与服务端同源，ordinal 相 / 照度 / 高度 / 食 / 可用月光）。 */
+    private static volatile int moonPhase = 0;
+    private static volatile float moonIllum = 0f, moonAlt = 0f, moonEclipse = 0f, moonlight = 0f;
+    /** 是否收到过光学包； false 时表现层退回用本地 LunarField 推导，避免首帧黑月。 */
+    private static volatile boolean moonSynced = false;
+    /** 多气体联合暴露（1 Hz 探针包），HUD 与雾色共用。 */
+    private static volatile float exposure = 0f, visibility = 1f;
+    private static volatile int exposureGrade = 0;
     private static float flash = 0f;
     private static int flashTimer = 0;
     private static int probeTimer = 0;
@@ -98,10 +112,12 @@ public final class ClientVisualState {
         co2 = value;
     }
 
-    /** 0..1 污染浑浊度：CO₂ 超过 1% 起逐渐明显，5% 封顶；PM 也计入（取较大者）。 */
+    /** 0..1 污染浑浊度：CO₂、PM 与服务端联合暴露指数取较大者，避免只按单一气体染色。 */
     public static float pollution() {
         float byCo2 = Mth.clamp((co2 - 0.01f) / 0.04f, 0f, 1f);
-        return Math.max(byCo2, Mth.clamp(pm, 0f, 1f) * 0.8f);
+        float byPm = Mth.clamp(pm, 0f, 1f) * 0.8f;
+        float byExposure = Mth.clamp(exposure, 0f, 1f) * 0.9f;
+        return Math.max(byCo2, Math.max(byPm, byExposure));
     }
 
     // ---- 多气体读数 ----
@@ -113,22 +129,77 @@ public final class ClientVisualState {
     public static float co() { return co; }
     public static float pm() { return pm; }
 
+    // ---- 多气体联合暴露 ----
+    public static void setExposure(float index, int grade, float vis) {
+        exposure = index; exposureGrade = grade; visibility = vis;
+    }
+    public static float exposure() { return exposure; }
+    public static int exposureGrade() { return exposureGrade; }
+    public static GasExposure.Grade exposureGradeEnum() {
+        GasExposure.Grade[] g = GasExposure.Grade.values();
+        return exposureGrade >= 0 && exposureGrade < g.length ? g[exposureGrade] : GasExposure.Grade.NONE;
+    }
+    public static float visibility() { return visibility; }
+
     // ---- 光学现象状态 ----
-    public static void setOptics(int kind, boolean artistic, int duration,
-                                 float ph, float ha, float fb, float ag, float au) {
+    /** 网络线程调用：整体替换数组引用，渲染线程读到的永远是一份完整快照。 */
+    public static void setOptics(int kind, boolean artistic, int duration, float[] strengths,
+                                 int phase, float illum, float alt, float eclipse, float moonlightValue) {
+        float[] copy = new float[OpticalField.KIND_COUNT];
+        if (strengths != null) {
+            System.arraycopy(strengths, 0, copy, 0, Math.min(copy.length, strengths.length));
+        }
         opticsKind = kind;
         opticsArtistic = artistic;
         opticsDuration = duration;
-        parhelion = ph; halo = ha; fogbow = fb; afterglow = ag; aurora = au;
+        opticsStrength = copy;
+        moonPhase = phase;
+        moonIllum = illum;
+        moonAlt = alt;
+        moonEclipse = eclipse;
+        moonlight = moonlightValue;
+        moonSynced = true;
+    }
+
+    /** 断线时回到"未同步"状态，下一局的月亮读数不被上一局污染。 */
+    public static void resetOptics() {
+        opticsKind = 0;
+        opticsArtistic = false;
+        opticsDuration = 0;
+        opticsStrength = new float[OpticalField.KIND_COUNT];
+        moonPhase = 0;
+        moonIllum = 0f; moonAlt = 0f; moonEclipse = 0f; moonlight = 0f;
+        moonSynced = false;
+        exposure = 0f; visibility = 1f; exposureGrade = 0;
+    }
+
+    public static boolean moonSynced() { return moonSynced; }
+    /** 渲染线程调用：先取局部引用，再读下标，保证一致。 */
+    public static float strength(OpticalField.Kind kind) {
+        float[] s = opticsStrength;
+        int i = kind.ordinal();
+        return i >= 0 && i < s.length ? s[i] : 0f;
+    }
+    public static float strength(int kindIndex) {
+        float[] s = opticsStrength;
+        return kindIndex >= 0 && kindIndex < s.length ? s[kindIndex] : 0f;
     }
     public static int opticsKind() { return opticsKind; }
     public static boolean opticsArtistic() { return opticsArtistic; }
     public static int opticsDuration() { return opticsDuration; }
-    public static float parhelion() { return parhelion; }
-    public static float halo() { return halo; }
-    public static float fogbow() { return fogbow; }
-    public static float afterglow() { return afterglow; }
-    public static float aurora() { return aurora; }
+    // 旧 getter 保留（源码兼容），内部改为读数组
+    public static float parhelion() { return strength(OpticalField.Kind.PARHELION); }
+    public static float halo() { return strength(OpticalField.Kind.HALO); }
+    public static float fogbow() { return strength(OpticalField.Kind.FOGBOW); }
+    public static float afterglow() { return strength(OpticalField.Kind.AFTERGLOW); }
+    public static float aurora() { return strength(OpticalField.Kind.AURORA); }
+
+    // ---- 月亮 ----
+    public static int moonPhase() { return moonPhase; }
+    public static float moonIllum() { return moonIllum; }
+    public static float moonAlt() { return moonAlt; }
+    public static float moonEclipse() { return moonEclipse; }
+    public static float moonlight() { return moonlight; }
 
     /** 0..1 flash brightness of the current lightning blink. */
     public static float flash() {

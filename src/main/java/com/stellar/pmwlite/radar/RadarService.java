@@ -104,6 +104,17 @@ public final class RadarService {
         var manager = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, mod.config());
         var probe = new com.stellar.pmwlite.atmos.AtmosphereGrid.Probe();
         boolean ok = manager.probe(player.position().add(0, player.getEyeHeight(), 0), probe);
+        // 联合暴露与服务端效果判定用同一个纯函数、同一份探针、同一个降雨读数，
+        // 保证 HUD 显示的等级就是玩家实际承受的等级。
+        float exposure = 0f, visibility = 1f;
+        int grade = 0;
+        if (ok) {
+            float rain = mod.config().wetDeposition ? level.getRainLevel(1f) : 0f;
+            var ex = com.stellar.pmwlite.atmos.GasExposure.fromProbe(probe, rain, null);
+            exposure = ex.index;
+            grade = ex.grade.ordinal();
+            visibility = ex.visibility;
+        }
         com.stellar.pmwlite.network.AtmosProbePacket packet = ok
                 ? new com.stellar.pmwlite.network.AtmosProbePacket(true, probe.underground,
                 probe.pressureHpa, probe.tempC, probe.humidity, probe.oxygen,
@@ -112,9 +123,11 @@ public final class RadarService {
                 probe.gases[com.stellar.pmwlite.atmos.GasField.SO2],
                 probe.gases[com.stellar.pmwlite.atmos.GasField.NO2],
                 probe.gases[com.stellar.pmwlite.atmos.GasField.CO],
-                probe.gases[com.stellar.pmwlite.atmos.GasField.PM])
+                probe.gases[com.stellar.pmwlite.atmos.GasField.PM],
+                exposure, grade, visibility)
                 : new com.stellar.pmwlite.network.AtmosProbePacket(false, false,
-                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f,
+                0f, 0, 1f);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
     }
 
@@ -125,7 +138,11 @@ public final class RadarService {
         ServerLevel level = player.serverLevel();
         var manager = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, mod.config());
         var snap = manager.optics().snapshot();
+        var probe = new com.stellar.pmwlite.atmos.AtmosphereGrid.Probe();
+        manager.probe(player.position().add(0, player.getEyeHeight(), 0), probe);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
-                com.stellar.pmwlite.network.AtmosOpticsPacket.from(snap));
+                com.stellar.pmwlite.network.AtmosOpticsPacket.from(
+                        snap, level.getDayTime(), probe.cloud, level.getRainLevel(1f),
+                        mod.config().moonSystem));
     }
 }

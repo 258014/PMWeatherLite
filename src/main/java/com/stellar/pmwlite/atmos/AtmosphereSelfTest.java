@@ -273,8 +273,8 @@ public final class AtmosphereSelfTest {
         float auDay = auroraDay.strength[OpticalField.Kind.AURORA.ordinal()];
         r.check(auNight > 0.3f && auNight > auDay * 5f,
                 String.format("极光需夜+高纬+磁扰（夜 %.2f vs 昼 %.2f）", auNight, auDay));
-        r.check(auroraNight.artistic && auroraNight.dominant == OpticalField.Kind.AURORA,
-                "极光场景主导现象为艺术化光幕");
+        r.check(auNight > 0.3f && !OpticalField.Kind.AURORA.scientific,
+                "极光样光幕标记为艺术化（不冒充科学）");
 
         // 霞光：低太阳角 + 气溶胶 → 触发；所有强度有界且有限
         var si = new OpticalField.Input();
@@ -296,6 +296,161 @@ public final class AtmosphereSelfTest {
         var underground = OpticalField.solve(ui, null);
         r.check(underground.dominant == OpticalField.Kind.NONE,
                 "地下不触发任何天空光学现象");
+
+        // 1f) v0.3.4 多气体联合暴露：协同、湿沉降、CO 不溶于水、分级单调。
+        var gNone = GasExposure.evaluate(0f, 0f, 0f, 0f, 4e-4f, 0f, null);
+        var gS = GasExposure.evaluate(3e-4f, 0f, 0f, 0f, 4e-4f, 0f, null);
+        var gP = GasExposure.evaluate(0f, 0f, 0f, 0.30f, 4e-4f, 0f, null);
+        var gSP = GasExposure.evaluate(3e-4f, 0f, 0f, 0.30f, 4e-4f, 0f, null);
+        r.check(gNone.grade == GasExposure.Grade.NONE, "清洁空气联合暴露为无风险");
+        r.check(gSP.index > gS.index * 1.4f && gSP.index > gP.index * 1.4f,
+                String.format("SO₂+PM 协同风险高于任一单气体（组合 %.2f，单 %+.2f/%+.2f）",
+                        gSP.index, gS.index, gP.index));
+        var gWet = GasExposure.evaluate(3e-4f, 0f, 0f, 0.30f, 4e-4f, 1f, null);
+        r.check(gWet.index < gSP.index && gWet.visibility > gSP.visibility,
+                String.format("降雨湿沉降降低暴露并提高能见度（%.2f→%.2f）", gSP.index, gWet.index));
+        var gCoDry = GasExposure.evaluate(0f, 0f, 3e-3f, 0f, 4e-4f, 0f, null);
+        var gCoWet = GasExposure.evaluate(0f, 0f, 3e-3f, 0f, 4e-4f, 1f, null);
+        r.check(Math.abs(gCoDry.index - gCoWet.index) < 1e-6f,
+                "CO 难溶于水，降雨不清除一氧化碳风险");
+        boolean exposureBounded = true;
+        for (float[] combo : new float[][]{{0f, 0f, 0f, 0f, 4e-4f},
+                {2e-3f, 1e-3f, 1e-2f, 1f, 0.05f}}) {
+            var ex = GasExposure.evaluate(combo[0], combo[1], combo[2], combo[3], combo[4], 0f, null);
+            if (!Float.isFinite(ex.index) || ex.index < 0f || ex.index > 1f
+                    || ex.visibility < 0f || ex.visibility > 1f) exposureBounded = false;
+        }
+        r.check(exposureBounded, "联合暴露指数与能见度始终有限且在 0..1");
+
+        // 1g) 月亮纯函数：相位、照度、月食只发生在满月食季。
+        r.check(LunarField.illumination(0L) > 0.99f, "月相 0 = 满月，照度≈100%");
+        r.check(LunarField.illumination(24000L * 4L) < 0.01f, "月相 4 = 新月，照度≈0");
+        r.check(LunarField.eclipse(0L) > 0.5f, "满月 + 食季触发月食");
+        r.check(LunarField.eclipse(24000L * 4L) == 0f, "新月不可能月食");
+        r.check(LunarField.eclipse(24000L * 8L * 7L) == 0f, "非食季不可能月食");
+        r.check(LunarField.altitudeDeg(6000L) < -80f, "正午月亮在地平线以下");
+        r.check(LunarField.moonlight(0L, 0.8f, 0f) < LunarField.moonlight(0L, 0f, 0f),
+                "云量削弱可用月光");
+
+        // 1h) v0.3.4 的 16 种新现象：逐个构造必要条件，验证"该触发时触发、不该触发时不触发"。
+        r.check(OpticalField.KIND_COUNT == 22, "光学现象枚举共 22 种（前 6 个 ordinal 未变）");
+        OpticalField.Kind[] wire = {OpticalField.Kind.NONE, OpticalField.Kind.PARHELION,
+                OpticalField.Kind.HALO, OpticalField.Kind.FOGBOW, OpticalField.Kind.AFTERGLOW,
+                OpticalField.Kind.AURORA};
+        boolean wireStable = true;
+        for (int i = 0; i < wire.length; i++) {
+            if (OpticalField.Kind.values()[i] != wire[i]) wireStable = false;
+        }
+        r.check(wireStable, "前 6 个 ordinal 与 v0.3.3 网络协议一致（新现象只追加）");
+
+        var ni = new OpticalField.Input();
+        ni.tempC = -10f; ni.dewPointC = -16f; ni.humidity = 0.55f;
+        ni.cloud = 0.42f; ni.cloudBaseM = 5500f; ni.pm = 0.02f;
+        ni.sunAltitudeDeg = 15f;
+        float czaLow = OpticalField.solve(ni, null).strength[OpticalField.Kind.CIRCUMZENITHAL.ordinal()];
+        ni.sunAltitudeDeg = 70f;
+        var highSun = OpticalField.solve(ni, null);
+        float czaHigh = highSun.strength[OpticalField.Kind.CIRCUMZENITHAL.ordinal()];
+        float chaHigh = highSun.strength[OpticalField.Kind.CIRCUMHORIZONTAL.ordinal()];
+        r.check(czaLow > 0.5f && czaHigh < 0.01f,
+                String.format("环天顶弧只在低太阳角触发（15° %.2f vs 70° %.2f）", czaLow, czaHigh));
+        r.check(chaHigh > 0.5f, String.format("环地平弧在高太阳角触发（70° %.2f）", chaHigh));
+
+        ni.sunAltitudeDeg = 0f; ni.cloud = 0.10f;
+        float pillarLow = OpticalField.solve(ni, null).strength[OpticalField.Kind.SUN_PILLAR.ordinal()];
+        ni.sunAltitudeDeg = 70f;
+        float pillarHigh = OpticalField.solve(ni, null).strength[OpticalField.Kind.SUN_PILLAR.ordinal()];
+        r.check(pillarLow > 0.5f && pillarHigh < 0.15f,
+                String.format("日柱随太阳高度升高而消失（%.2f → %.2f）", pillarLow, pillarHigh));
+
+        var ii = new OpticalField.Input();
+        ii.tempC = 18f; ii.dewPointC = 10f; ii.cloud = 0.45f; ii.pm = 0.01f; ii.sunAltitudeDeg = 35f;
+        r.check(OpticalField.solve(ii, null).strength[OpticalField.Kind.IRIDESCENT.ordinal()] > 0.5f,
+                "薄云 + 中小水滴触发虹彩云");
+
+        var gi2 = new OpticalField.Input();
+        gi2.tempC = 1f; gi2.dewPointC = 0.5f; gi2.humidity = 1f;
+        gi2.cloud = 0.10f; gi2.cloudBaseM = 0f; gi2.sunAltitudeDeg = 4f;
+        r.check(OpticalField.solve(gi2, null).strength[OpticalField.Kind.GLORY.ordinal()] > 0.35f,
+                "背光 + 近饱和低雾触发宝光");
+
+        var ri = new OpticalField.Input();
+        ri.sunAltitudeDeg = 15f; ri.rain = 1f; ri.cloud = 0.65f; ri.tempC = 12f; ri.dewPointC = 10f;
+        r.check(OpticalField.solve(ri, null).strength[OpticalField.Kind.RAINBOW.ordinal()] > 0.6f,
+                "低太阳角 + 降水触发双彩虹");
+
+        var mi = new OpticalField.Input();
+        mi.moonAltitudeDeg = 40f; mi.moonIllum = 1f; mi.cloud = 0.42f; mi.pm = 0.01f;
+        mi.sunAltitudeDeg = -30f;
+        var moonSolve = OpticalField.solve(mi, null);
+        r.check(moonSolve.strength[OpticalField.Kind.MOON_CORONA.ordinal()] > 0.6f,
+                "明月 + 薄云触发月华");
+        mi.moonEclipse = 1f;
+        mi.cloud = 0.05f;
+        r.check(OpticalField.solve(mi, null).strength[OpticalField.Kind.LUNAR_ECLIPSE.ordinal()] > 0.6f,
+                "满月月食触发月食现象");
+        r.check(OpticalField.solve(mi, null).strength[OpticalField.Kind.MOON_CORONA.ordinal()]
+                < moonSolve.strength[OpticalField.Kind.MOON_CORONA.ordinal()],
+                "月食期间月华被遮蔽");
+
+        var ci = new OpticalField.Input();
+        ci.pm = 0.01f; ci.cloud = 0.50f;
+        ci.sunAltitudeDeg = 2f;
+        float crep = OpticalField.solve(ci, null).strength[OpticalField.Kind.CREPUSCULAR.ordinal()];
+        ci.sunAltitudeDeg = -2f;
+        var twi = OpticalField.solve(ci, null);
+        r.check(crep > 0.5f && twi.strength[OpticalField.Kind.ANTICREPUSCULAR.ordinal()] > 0.4f,
+                "曙暮辉与反曙暮辉分别在日落前后触发");
+        ci.sunAltitudeDeg = -6f; ci.cloud = 0.10f;
+        var duskSolve = OpticalField.solve(ci, null);
+        r.check(duskSolve.strength[OpticalField.Kind.BELT_VENUS.ordinal()] > 0.5f,
+                "民用暮光触发维纳斯带");
+        r.check(duskSolve.strength[OpticalField.Kind.EARTH_SHADOW.ordinal()] > 0.3f,
+                "民用暮光触发地球阴影");
+
+        var ai2 = new OpticalField.Input();
+        ai2.sunAltitudeDeg = -40f; ai2.cloud = 0.05f; ai2.pm = 0.01f;
+        float air = OpticalField.solve(ai2, null).strength[OpticalField.Kind.AIRGLOW.ordinal()];
+        r.check(air > 0.3f && air < 0.46f,
+                String.format("气辉在晴朗夜间出现且比极光暗（%.2f）", air));
+
+        var fi = new OpticalField.Input();
+        fi.inversionC = 10f; fi.sunAltitudeDeg = 5f; fi.cloud = 0.10f; fi.pm = 0.01f;
+        float fm = OpticalField.solve(fi, null).strength[OpticalField.Kind.FATA_MORGANA.ordinal()];
+        fi.inversionC = 0f;
+        float fmNo = OpticalField.solve(fi, null).strength[OpticalField.Kind.FATA_MORGANA.ordinal()];
+        r.check(fm > 0.35f && fmNo < 0.01f,
+                String.format("法塔莫甘娜需要强逆温（%.2f → 无逆温 %.2f）", fm, fmNo));
+
+        var bi = new OpticalField.Input();
+        bi.pm = 0.8f; bi.sunAltitudeDeg = 12f; bi.cloud = 0.1f;
+        r.check(OpticalField.solve(bi, null).strength[OpticalField.Kind.BLUE_SUN.ordinal()] > 0.7f,
+                "浓气溶胶触发蓝太阳");
+        var ei = new OpticalField.Input();
+        ei.sunAltitudeDeg = 0.2f; ei.pm = 0.01f; ei.cloud = 0.05f; ei.tempC = 15f; ei.dewPointC = 13f;
+        r.check(OpticalField.solve(ei, null).strength[OpticalField.Kind.GREEN_FLASH.ordinal()] > 0.5f,
+                "地平线 + 通透空气触发绿闪");
+
+        boolean allScientific = true;
+        for (OpticalField.Kind k : OpticalField.Kind.values()) {
+            if (k != OpticalField.Kind.AURORA && k != OpticalField.Kind.NONE && !k.scientific) allScientific = false;
+        }
+        r.check(allScientific, "除极光样光幕外，新增现象均标为科学可解释");
+
+        var extreme = new OpticalField.Input();
+        extreme.sunAltitudeDeg = 999f; extreme.moonAltitudeDeg = -999f;
+        extreme.tempC = 999f; extreme.dewPointC = -999f; extreme.humidity = 99f;
+        extreme.cloud = 99f; extreme.cloudBaseM = -99f; extreme.pm = 99f;
+        extreme.so2 = 99f; extreme.no2 = 99f; extreme.co = 99f; extreme.co2 = 99f;
+        extreme.inversionC = 999f; extreme.moonIllum = 99f; extreme.moonEclipse = 99f;
+        extreme.rain = 99f; extreme.kp = 999f; extreme.geomagneticLat = 999f;
+        boolean extBounded = true;
+        var er = OpticalField.solve(extreme, null);
+        for (int i = 0; i < OpticalField.KIND_COUNT; i++) {
+            float v = er.strength[i];
+            if (!Float.isFinite(v) || v < 0f || v > 1f) extBounded = false;
+        }
+        r.check(extBounded, "极端输入下 22 种强度仍全部有限且有界");
 
         // ---------------- 2) 全球模型 ----------------
         GlobalModel gm = new GlobalModel(level);

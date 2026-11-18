@@ -48,13 +48,15 @@ public final class ClientRadarCache {
         if (msg.valid()) {
             ClientVisualState.setCo2(msg.co2());
             ClientVisualState.setGases(msg.so2(), msg.no2(), msg.co(), msg.pm());
+            ClientVisualState.setExposure(msg.exposure(), msg.exposureGrade(), msg.visibility());
         }
     }
 
     /** 光学状态包：写到客户端视觉状态，渲染层与 HUD 共用同一份。 */
     public static void acceptOptics(AtmosOpticsPacket msg) {
         ClientVisualState.setOptics(msg.kind(), msg.artistic(), msg.durationSec(),
-                msg.parhelion(), msg.halo(), msg.fogbow(), msg.afterglow(), msg.aurora());
+                msg.strengths(), msg.moonPhase(), msg.moonIllum(), msg.moonAlt(),
+                msg.moonEclipse(), msg.moonlight());
     }
 
     public static RadarSyncPacket snapshot() {
@@ -102,6 +104,7 @@ public final class ClientRadarCache {
         layerAt = 0L;
         probe = null;
         probeAt = 0L;
+        ClientVisualState.resetOptics();
     }
 
     /**

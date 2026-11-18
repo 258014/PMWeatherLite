@@ -67,6 +67,16 @@ public final class ServerConfig {
     /** 是否渲染光学现象的屏幕叠加层；关掉只保留 HUD 文字读数。 */
     public boolean opticsOverlay = true;
 
+    // ---------------- v0.3.4 多气体联合风险 / 天文与月亮 ----------------
+    /** 多气体联合暴露（协同+湿沉降+分级效果）总开关；关掉退回 v0.3.3 的单一 CO₂ 判定。 */
+    public boolean multiGasEffects = true;
+    /** 降水对 SO₂/NO₂/PM 的湿沉降洗出；关掉后雨不再降低浓度与浑浊度。 */
+    public boolean wetDeposition = true;
+    /** 月相/月面明暗/月光照明/月食与月华等天文现象总开关。 */
+    public boolean moonSystem = true;
+    /** 是否渲染月亮与天文光学现象的 2D 叠加层；关掉保留文字读数。 */
+    public boolean astronomyOverlay = true;
+
     /**
      * Per-block wind speed threshold at which the block is ripped up.
      * Ported from source blockStrengths defaults (leaves 50-65, wool 60, etc.).
