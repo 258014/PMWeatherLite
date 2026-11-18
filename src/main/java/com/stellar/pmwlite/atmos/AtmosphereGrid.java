@@ -7,6 +7,7 @@ import net.minecraft.tags.FluidTags;
 import net.minecraft.util.Mth;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
 
@@ -65,11 +66,14 @@ public final class AtmosphereGrid {
     private final float[] v = new float[N];
     private final float[] w = new float[N];
     private final float[] cloud = new float[N];
+    /** CO₂ 体积分数示踪场。背景 4e-4（400 ppm），机器/火焰排放后随风平流形成羽流。 */
+    private final float[] co2 = new float[N];
 
     private final float[] tN = new float[N];
     private final float[] qN = new float[N];
     private final float[] o2N = new float[N];
     private final float[] cloudN = new float[N];
+    private final float[] co2N = new float[N];
     private final float[] phi = new float[N];
     private final float[] div = new float[N];
 
@@ -78,7 +82,12 @@ public final class AtmosphereGrid {
     private final float[] groundT = new float[SX * SZ];
     private final float[] water = new float[SX * SZ];
     private final float[] fire = new float[SX * SZ];
+    /** 每列的排放源强度（0..1）：燃烧的机器/火/熔岩耗氧并排 CO₂。 */
+    private final float[] emission = new float[SX * SZ];
     private final float[] layerMeanT = new float[SY];
+
+    /** CO₂ 背景体积分数（约 400 ppm）。 */
+    public static final float CO2_BACKGROUND = 0.0004f;
 
     private final ServerLevel level;
     private int originX, originZ, baseY;
@@ -86,12 +95,22 @@ public final class AtmosphereGrid {
     private int fireCursor;
     private int steps;
     private boolean ready;
+    /** CO₂ 子系统开关（由调度器按配置设置；默认开，自检无需配置也能测）。 */
+    private boolean co2Enabled = true;
+    private boolean machineEmissions = true;
+
+    public void configure(boolean co2Enabled, boolean machineEmissions) {
+        this.co2Enabled = co2Enabled;
+        this.machineEmissions = machineEmissions;
+    }
 
     /** 复用的查询结果，避免每次采样都 new。 */
     public static final class Probe {
         public float pressureHpa, tempC, humidity;
         /** 等效含氧量（体积分数 × 气压比，海平面 0.2095）。 */
         public float oxygen;
+        /** CO₂ 体积分数（ppm 需 ×1e6）。背景 4e-4，污染羽流可到 1e-2 以上。 */
+        public float co2;
         public float cloud;
         public float windX, windY, windZ, windSpeed;
         public float dewPointC, apparentC, cloudBaseM;
@@ -102,6 +121,7 @@ public final class AtmosphereGrid {
             tempC = 15f;
             humidity = 0.5f;
             oxygen = 0.2095f;
+            co2 = CO2_BACKGROUND;
             cloud = 0f;
             windX = windY = windZ = windSpeed = 0f;
             dewPointC = 0f;
@@ -188,6 +208,9 @@ public final class AtmosphereGrid {
                     float rh = solid ? 0.25f : 0.62f;
                     q[i] = ApparentTemperature.saturationMixingRatio(t[i], p[i]) * rh;
                     o2[i] = solid ? 0.02f : (isOpenSky(x, y, z) ? 0.2095f : 0.198f);
+                    // 密闭/地下空气略"陈"，CO₂ 稍高；开阔天空取背景值
+                    co2[i] = solid ? CO2_BACKGROUND * 2f
+                            : (isOpenSky(x, y, z) ? CO2_BACKGROUND : CO2_BACKGROUND * 1.5f);
                     cloud[i] = 0f;
                     float profile = 0.55f + 0.45f * Mth.clamp(
                             (centreY - surfaceY[col]) / 160f, 0f, 1f);
@@ -203,6 +226,7 @@ public final class AtmosphereGrid {
             qN[i] = q[i];
             o2N[i] = o2[i];
             cloudN[i] = 0f;
+            co2N[i] = co2[i];
             phi[i] = 0f;
         }
         ready = true;
@@ -297,16 +321,25 @@ public final class AtmosphereGrid {
             int wz = originZ + z * CELL + CELL / 2;
             int wy = surfaceY[col];
             float f = 0f;
-            for (int dy = -1; dy <= 2; dy++) {
+            float em = 0f;
+            for (int dy = -1; dy <= 3; dy++) {
                 BlockPos pos = new BlockPos(wx, wy + dy, wz);
                 BlockState st = level.getBlockState(pos);
                 if (st.is(Blocks.FIRE) || st.is(Blocks.SOUL_FIRE) || st.is(Blocks.CAMPFIRE)
                         || st.is(Blocks.LAVA) || st.is(Blocks.MAGMA_BLOCK)) {
                     f = Math.max(f, st.is(Blocks.LAVA) ? 1f : 0.7f);
+                    em = Math.max(em, st.is(Blocks.LAVA) ? 0.8f : 0.6f);
+                }
+                // 燃烧中的机器：熔炉/烟熏炉/高炉等都带通用 LIT 属性。
+                // 用属性而不是硬编码方块表，这样 Create / GTCEu 的耗氧机器也能自动接进来。
+                if (co2Enabled && machineEmissions && st.hasProperty(BlockStateProperties.LIT)
+                        && Boolean.TRUE.equals(st.getValue(BlockStateProperties.LIT))) {
+                    em = Math.max(em, 0.9f);
                 }
             }
-            // 火有生命周期，平滑一下避免闪烁
+            // 火/排放有生命周期，平滑一下避免闪烁
             fire[col] = Mth.lerp(0.35f, fire[col], f);
+            emission[col] = Mth.lerp(0.30f, emission[col], em);
         }
     }
 
@@ -344,9 +377,23 @@ public final class AtmosphereGrid {
                     q[i] = Math.min(q[i] + fire[col] * 0.004f * dt, qs * 1.2f);
                 }
 
+                // 排放源：燃烧的机器/火耗氧并排 CO₂（近似 1:1 摩尔交换）。
+                // 这是"机器耗氧→释放二氧化碳"的入口；CO₂ 随后由 advect() 随风平流形成羽流。
+                if (co2Enabled && emission[col] > 0.01f) {
+                    float burn = emission[col] * 0.0045f * dt;
+                    o2[i] = Math.max(0f, o2[i] - burn);
+                    // 规模标定：满负荷机器持续燃烧，近地面羽流可到 ~1%（10000 ppm 级），
+                    // 足够驱动 PoT 的碳中毒阈值，又不至于一步爆表。
+                    co2[i] += burn * 1.6f;
+                }
+
                 // 氧气与外界交换：只有敞口格子才和大气库连通
                 if (isOpenSky(x, ySurf, z)) {
                     o2[i] += (0.2095f - o2[i]) * (1f - (float) Math.exp(-dt / 120f));
+                    // CO₂ 也会被大气库稀释扩散回背景（通风），否则会在开阔地永久累积。
+                    if (co2Enabled) {
+                        co2[i] += (CO2_BACKGROUND - co2[i]) * (1f - (float) Math.exp(-dt / 260f));
+                    }
                 }
             }
         }
@@ -429,6 +476,7 @@ public final class AtmosphereGrid {
                         qN[i] = q[i];
                         o2N[i] = o2[i];
                         cloudN[i] = cloud[i];
+                        co2N[i] = co2[i];
                         continue;
                     }
                     double gx = x - u[i] * dt / CELL;
@@ -438,6 +486,9 @@ public final class AtmosphereGrid {
                     qN[i] = Math.max(0f, sample(q, gx, gy, gz, q[i]));
                     o2N[i] = Math.max(0f, sample(o2, gx, gy, gz, o2[i]));
                     cloudN[i] = Mth.clamp(sample(cloud, gx, gy, gz, cloud[i]), 0f, 1f);
+                    // CO₂ 与其余标量一样用同一条半拉格朗日回溯轨迹输送：排放源下风处形成羽流。
+                    co2N[i] = Math.max(CO2_BACKGROUND * 0.5f,
+                            sample(co2, gx, gy, gz, co2[i]));
                 }
             }
         }
@@ -631,6 +682,7 @@ public final class AtmosphereGrid {
             t[i] = Mth.clamp(t[i], -90f, 70f);
             q[i] = Mth.clamp(q[i], 0f, 60f);
             o2[i] = Mth.clamp(o2[i], 0f, 0.30f);
+            co2[i] = Mth.clamp(co2[i], 0f, 0.12f);
             cloud[i] = Mth.clamp(cloud[i], 0f, 1f);
             w[i] = Mth.clamp(w[i], -25f, 30f);
         }
@@ -641,6 +693,7 @@ public final class AtmosphereGrid {
         System.arraycopy(qN, 0, q, 0, N);
         System.arraycopy(o2N, 0, o2, 0, N);
         System.arraycopy(cloudN, 0, cloud, 0, N);
+        System.arraycopy(co2N, 0, co2, 0, N);
     }
 
     // ================================================================
@@ -667,6 +720,7 @@ public final class AtmosphereGrid {
         // 真正让人高原反应的是**氧分压**，所以这里按气压折算。
         out.oxygen = sample(o2, gx, gy, gz, 0.2095f)
                 * Mth.clamp(out.pressureHpa / 1013.25f, 0f, 1f);
+        out.co2 = sample(co2, gx, gy, gz, CO2_BACKGROUND);
         out.cloud = sample(cloud, gx, gy, gz, 0f);
         out.windX = sample(u, gx, gy, gz, 0f);
         out.windY = sample(w, gx, gy, gz, 0f);
@@ -685,6 +739,19 @@ public final class AtmosphereGrid {
         int x = Mth.clamp((int) ((wx - originX) / CELL), 0, SX - 1);
         int z = Mth.clamp((int) ((wz - originZ) / CELL), 0, SZ - 1);
         return wy >= surfaceY[z * SX + x];
+    }
+
+    /**
+     * 兼容层入口：在世界坐标处注入一份排放源（耗氧机器 / KubeJS / 其他 mod 调用）。
+     * 强度 0..1，取列内最大值；下一场 step 就会耗氧并排 CO₂，随后随风平流。
+     * 这是"机器耗氧→排 CO₂"对外的通用接线点，不必硬编码具体机器方块表。
+     */
+    public void injectEmission(double wx, double wz, float strength) {
+        if (!ready || !covers(wx, wz)) return;
+        int x = Mth.clamp((int) ((wx - originX) / CELL), 0, SX - 1);
+        int z = Mth.clamp((int) ((wz - originZ) / CELL), 0, SZ - 1);
+        int col = z * SX + x;
+        emission[col] = Math.max(emission[col], Mth.clamp(strength, 0f, 1f));
     }
 
     /** 指定列的地面温度（供"海陆风"与 HUD 使用）。 */
@@ -749,6 +816,24 @@ public final class AtmosphereGrid {
 
     public float oxygen(int x, int y, int z) {
         return o2[idx(x, y, z)];
+    }
+
+    public float co2(int x, int y, int z) {
+        return co2[idx(x, y, z)];
+    }
+
+    /** 整列 CO₂ 的最大值（玩家可能站在任一高度，取全列最强污染）。 */
+    public float columnCo2(double wx, double wz) {
+        if (!ready || !covers(wx, wz)) return CO2_BACKGROUND;
+        int x = Mth.clamp((int) ((wx - originX) / CELL), 0, SX - 1);
+        int z = Mth.clamp((int) ((wz - originZ) / CELL), 0, SZ - 1);
+        float best = 0f;
+        for (int y = 0; y < SY; y++) {
+            if (isSolid(x, y, z)) continue;
+            float c = co2[idx(x, y, z)];
+            if (c > best) best = c;
+        }
+        return best;
     }
 
     public float cloud(int x, int y, int z) {

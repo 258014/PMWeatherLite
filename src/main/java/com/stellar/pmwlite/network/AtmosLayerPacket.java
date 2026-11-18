@@ -29,10 +29,11 @@ public record AtmosLayerPacket(
     public static final int LAYER_OXYGEN = 4;
     public static final int LAYER_WIND = 5;
     public static final int LAYER_APPARENT = 6;
-    public static final int LAYER_COUNT = 7;
+    public static final int LAYER_CO2 = 7;
+    public static final int LAYER_COUNT = 8;
 
     public static final String[] NAMES = {
-            "降水/云量", "气压", "气温", "相对湿度", "氧气", "风场", "体感温度"
+            "降水/云量", "气压", "气温", "相对湿度", "氧气", "风场", "体感温度", "二氧化碳"
     };
 
     public static AtmosLayerPacket empty(int kind) {

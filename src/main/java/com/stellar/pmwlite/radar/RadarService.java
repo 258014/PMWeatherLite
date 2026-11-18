@@ -108,9 +108,9 @@ public final class RadarService {
                 ? new com.stellar.pmwlite.network.AtmosProbePacket(true, probe.underground,
                 probe.pressureHpa, probe.tempC, probe.humidity, probe.oxygen,
                 probe.windSpeed, probe.apparentC, probe.dewPointC, probe.cloudBaseM,
-                probe.cloud, 0f)
+                probe.cloud, 0f, probe.co2)
                 : new com.stellar.pmwlite.network.AtmosProbePacket(false, false,
-                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
     }
 }

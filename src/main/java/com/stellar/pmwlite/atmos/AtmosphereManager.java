@@ -35,6 +35,15 @@ public final class AtmosphereManager {
     /** 低氧阈值。 */
     private static final float O2_FATIGUE = 0.145f;
     private static final float O2_DAMAGE = 0.085f;
+    /**
+     * CO₂ 中毒阈值（体积分数）。对齐 Pollution of the Realms 的碳污染分级，
+     * 这样两套系统给出一致的健康结局，不会一个说中毒一个说没事。
+     * 1% 起轻微（疲劳）、2% 虚弱、3% 反胃+视野发黑、5% 中毒+凋零。
+     */
+    private static final float CO2_FATIGUE = 0.010f;
+    private static final float CO2_WEAK = 0.020f;
+    private static final float CO2_NAUSEA = 0.030f;
+    private static final float CO2_POISON = 0.050f;
 
     private static final Map<ServerLevel, AtmosphereManager> INSTANCES = new WeakHashMap<>();
 
@@ -55,6 +64,7 @@ public final class AtmosphereManager {
         this.level = level;
         this.cfg = cfg;
         this.grid = new AtmosphereGrid(level);
+        this.grid.configure(cfg.co2System, cfg.machineEmissions);
         this.global = new GlobalModel(level);
     }
 
@@ -155,16 +165,16 @@ public final class AtmosphereManager {
 
     /** 低氧后果：先给挖掘疲劳，再给缓慢伤害。数值只做提示，不做惩罚性秒杀。 */
     private void effectTick() {
-        if (!cfg.oxygenEffects || level.players().isEmpty()) return;
+        if ((!cfg.oxygenEffects && !cfg.co2HealthEffects) || level.players().isEmpty()) return;
         for (ServerPlayer p : level.players()) {
             var probe = new AtmosphereGrid.Probe();
             if (!grid.probe(p.getX(), p.getEyeY(), p.getZ(), probe)) continue;
             if (p.isCreative() || p.isSpectator()) continue;
 
-            if (probe.oxygen < O2_FATIGUE) {
+            if (cfg.oxygenEffects && probe.oxygen < O2_FATIGUE) {
                 p.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 80, 0, true, false, false));
             }
-            if (probe.oxygen < O2_DAMAGE) {
+            if (cfg.oxygenEffects && probe.oxygen < O2_DAMAGE) {
                 int cd = damageCooldown.getOrDefault(p.getUUID(), 0);
                 if (cd <= 0) {
                     p.hurt(p.damageSources().drown(), 1.0f);
@@ -174,6 +184,23 @@ public final class AtmosphereManager {
                 }
             } else {
                 damageCooldown.remove(p.getUUID());
+            }
+
+            // CO₂ 中毒：复用原版 effect，与 PoT 的碳污染分级对齐。
+            // 注意用 hideParticles=false 的短时效果，离开污染区后会自然消退。
+            if (cfg.co2HealthEffects && probe.co2 >= CO2_FATIGUE) {
+                p.addEffect(new MobEffectInstance(MobEffects.DIG_SLOWDOWN, 80, 0, true, false, false));
+                if (probe.co2 >= CO2_WEAK) {
+                    p.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 80, 0, true, false, false));
+                }
+                if (probe.co2 >= CO2_NAUSEA) {
+                    p.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 80, 0, true, false, false));
+                    p.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 60, 0, true, false, false));
+                }
+                if (probe.co2 >= CO2_POISON) {
+                    p.addEffect(new MobEffectInstance(MobEffects.POISON, 80, 0, true, false, false));
+                    p.addEffect(new MobEffectInstance(MobEffects.WITHER, 60, 0, true, false, false));
+                }
             }
         }
         if (damageCooldown.size() > 256) {

@@ -51,6 +51,14 @@ public final class ServerConfig {
     /** 风暴是否被八层全球环流的中层引导气流推动（关掉则退回 v0.2 的纯噪声漂移）。 */
     public boolean globalSteering = true;
 
+    // ---------------- CO₂ 示踪场 / 污染（机器耗氧→排 CO₂→平流→中毒）----------------
+    /** CO₂ 示踪场总开关；关闭后不检测排放源、不平流 CO₂，行为与之前一致。 */
+    public boolean co2System = true;
+    /** 是否把"燃烧中的机器/火"当作耗氧排碳源（需要建造时才关心）。 */
+    public boolean machineEmissions = true;
+    /** CO₂ 健康后果：高浓度给缺氧/反胃等效果（复用原版 effect，供 PoT 等 mod 兼容）。 */
+    public boolean co2HealthEffects = true;
+
     /**
      * Per-block wind speed threshold at which the block is ripped up.
      * Ported from source blockStrengths defaults (leaves 50-65, wool 60, etc.).

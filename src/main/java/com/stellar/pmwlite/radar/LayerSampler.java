@@ -55,6 +55,8 @@ public final class LayerSampler {
                     case AtmosLayerPacket.LAYER_HUMIDITY -> probe.humidity * 100f;
                     case AtmosLayerPacket.LAYER_OXYGEN -> probe.oxygen * 100f;
                     case AtmosLayerPacket.LAYER_WIND -> probe.windSpeed;
+                    // CO₂ 取整列最大值并换算 ppm，排放羽流上风/下风都能看见
+                    case AtmosLayerPacket.LAYER_CO2 -> grid.columnCo2(wx, wz) * 1e6f;
                     default -> probe.apparentC;
                 };
                 values[i] = v;
@@ -90,6 +92,7 @@ public final class LayerSampler {
             case AtmosLayerPacket.LAYER_HUMIDITY -> "%";
             case AtmosLayerPacket.LAYER_OXYGEN -> "%";
             case AtmosLayerPacket.LAYER_WIND -> "m/s";
+            case AtmosLayerPacket.LAYER_CO2 -> "ppm";
             default -> "°C";
         };
 

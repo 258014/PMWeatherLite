@@ -19,7 +19,7 @@ public record AtmosProbePacket(
         boolean valid, boolean underground,
         float pressureHpa, float tempC, float humidity, float oxygen,
         float windSpeed, float apparentC, float dewPointC, float cloudBaseM,
-        float cloud, float groundT) {
+        float cloud, float groundT, float co2) {
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(valid);
@@ -34,13 +34,14 @@ public record AtmosProbePacket(
         buf.writeFloat(cloudBaseM);
         buf.writeFloat(cloud);
         buf.writeFloat(groundT);
+        buf.writeFloat(co2);
     }
 
     public static AtmosProbePacket decode(FriendlyByteBuf buf) {
         return new AtmosProbePacket(buf.readBoolean(), buf.readBoolean(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                buf.readFloat(), buf.readFloat());
+                buf.readFloat(), buf.readFloat(), buf.readFloat());
     }
 
     public static void handle(AtmosProbePacket msg, Supplier<NetworkEvent.Context> ctx) {

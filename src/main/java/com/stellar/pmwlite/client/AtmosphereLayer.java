@@ -39,7 +39,12 @@ public final class AtmosphereLayer {
         float lightScale = 1f - LightingState.shadowStrength * 0.06f - LightingState.dusk * 0.05f;
         lightScale = Mth.clamp(lightScale, 0.89f, 1f);
 
-        e.setFarPlaneDistance(Math.max(e.getFarPlaneDistance() * scale * lightScale, 12f));
+        // CO₂ 污染再收一档能见度（最多额外 -45%），独立于风暴强度——机器密集区
+        // 即使晴天也会灰蒙蒙，这正是"环境污染影响外观"的可视化。
+        float pollution = ClientVisualState.pollution();
+        float hazeScale = 1f - pollution * 0.45f;
+
+        e.setFarPlaneDistance(Math.max(e.getFarPlaneDistance() * scale * lightScale * hazeScale, 12f));
         e.setNearPlaneDistance(Math.min(e.getNearPlaneDistance() * scale * lightScale, 6f));
         e.setFogShape(FogShape.SPHERE);
     }
@@ -54,6 +59,18 @@ public final class AtmosphereLayer {
     public static void applyFogColor(ViewportEvent.ComputeFogColor e) {
         if (!ShaderCompatLayer.fogEventsAllowed()) return;
         float i = ClientVisualState.intensity();
+        float pollution = ClientVisualState.pollution();
+        // 风暴或污染任一存在才需要改色；污染单独也能让天空发黄。
+        if (i < 0.30f && pollution < 0.02f) return;
+
+        if (pollution > 0.02f) {
+            // 污染天幕：低饱和的黄褐色（硫/碳混合烟霾），强度随 CO₂ 上升
+            float pt = pollution * 0.5f;
+            float hazeR = 0.62f, hazeG = 0.56f, hazeB = 0.38f;
+            e.setRed(Mth.lerp(pt, e.getRed(), hazeR));
+            e.setGreen(Mth.lerp(pt, e.getGreen(), hazeG));
+            e.setBlue(Mth.lerp(pt, e.getBlue(), hazeB));
+        }
         if (i < 0.30f) return;
 
         float t = Mth.clamp((i - 0.30f) / 0.70f, 0f, 1f) * 0.55f;

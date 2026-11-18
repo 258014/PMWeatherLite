@@ -18,7 +18,7 @@ import java.util.List;
 /**
  * 气象雷达 / Weather Radar GUI。
  *
- * v0.3 起它不只是"看风暴在哪"，而是一个**大气观测台**：7 个图层（云量/气压/气温/湿度/氧气/
+ * v0.3 起它不只是"看风暴在哪"，而是一个**大气观测台**：8 个图层（云量/气压/气温/湿度/氧气/
  * 风场/体感温度）+ 风暴与固定资产标记。数据来自服务端的本地大气网格，不是客户端猜的。
  *
  * 全部通过 {@code GuiGraphics} 绘制，所以光影开不开都一样。
@@ -53,8 +53,8 @@ public class RadarScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // 1..7 直接选图层；左右方向键循环
-        if (keyCode >= GLFW.GLFW_KEY_1 && keyCode <= GLFW.GLFW_KEY_7) {
+        // 1..8 直接选图层；左右方向键循环
+        if (keyCode >= GLFW.GLFW_KEY_1 && keyCode <= GLFW.GLFW_KEY_8) {
             ClientRadarCache.setSelectedLayer(keyCode - GLFW.GLFW_KEY_1);
             lastLayerRequest = System.currentTimeMillis();
             return true;
@@ -313,8 +313,13 @@ public class RadarScreen extends Screen {
         g.drawString(this.font, String.format("§7氧气 %s%.1f%% §8| §7风 §f%.1f §8m/s",
                 o2col, a.oxygen() * 100f, a.windSpeed()), x, row, 0xFFFFFF, false);
         row += 11;
-        g.drawString(this.font, String.format("§7体感 §f%.1f §8°C   §7云底 §f%.0f §8m",
-                a.apparentC(), a.cloudBaseM()), x, row, 0xFFFFFF, false);
+        float ppm = a.co2() * 1e6f;
+        String co2col = ppm > 30000f ? "§c" : (ppm > 10000f ? "§e" : "§a");
+        g.drawString(this.font, String.format("§7CO₂ %s%.0f §8ppm  §8| §7体感 §f%.1f §8°C",
+                co2col, ppm, a.apparentC()), x, row, 0xFFFFFF, false);
+        row += 11;
+        g.drawString(this.font, String.format("§7云底 §f%.0f §8m   §7图层 §f%d §8/8",
+                a.cloudBaseM(), ClientRadarCache.selectedLayer() + 1), x, row, 0xFFFFFF, false);
     }
 
     private int kv(GuiGraphics g, int x, int y, String k, String v) {
@@ -324,7 +329,7 @@ public class RadarScreen extends Screen {
     }
 
     private void drawFooter(GuiGraphics g, int left, int top) {
-        g.drawString(this.font, "§8R/ESC 关闭 · 1-7 或 ←→ 切换图层 · 1 秒刷新",
+        g.drawString(this.font, "§8R/ESC 关闭 · 1-8 或 ←→ 切换图层 · 1 秒刷新",
                 left + 6, top + PANEL_H - 11, 0x777777, false);
     }
 

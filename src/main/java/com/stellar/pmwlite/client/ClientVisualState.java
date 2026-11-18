@@ -22,6 +22,8 @@ public final class ClientVisualState {
     private static float intensity = 0f;
     private static float thunder = 0f;
     private static boolean cold = false;
+    /** 本地 CO₂ 体积分数（由 1 Hz 探针包写入，供雾色/能见度染色）。 */
+    private static volatile float co2 = 0.0004f;
     private static float flash = 0f;
     private static int flashTimer = 0;
     private static int probeTimer = 0;
@@ -79,6 +81,19 @@ public final class ClientVisualState {
     /** True when the local biome is cold enough that precipitation should read as snow/hail. */
     public static boolean cold() {
         return cold;
+    }
+
+    public static float co2() {
+        return co2;
+    }
+
+    public static void setCo2(float value) {
+        co2 = value;
+    }
+
+    /** 0..1 污染浑浊度：CO₂ 超过 1% 起逐渐明显，5% 封顶。 */
+    public static float pollution() {
+        return Mth.clamp((co2 - 0.01f) / 0.04f, 0f, 1f);
     }
 
     /** 0..1 flash brightness of the current lightning blink. */

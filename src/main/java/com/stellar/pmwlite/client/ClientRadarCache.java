@@ -44,6 +44,7 @@ public final class ClientRadarCache {
     public static void acceptProbe(AtmosProbePacket msg) {
         probe = msg;
         probeAt = Util.getMillis();
+        if (msg.valid()) ClientVisualState.setCo2(msg.co2());
     }
 
     public static RadarSyncPacket snapshot() {

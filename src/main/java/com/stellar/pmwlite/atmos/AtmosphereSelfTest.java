@@ -176,6 +176,39 @@ public final class AtmosphereSelfTest {
         r.check(colCloud > 0.05f, String.format("降水条件下能成云（列云量 %.0f%%）", colCloud * 100f));
         r.check(colCloud <= 1.0f, String.format("云量 ≤ 100%%（%.0f%%）", colCloud * 100f));
 
+        // 1c) CO₂ 示踪场：注入排放源后必须成羽流，且随风输送、始终有界。
+        //     这一条钉住"机器耗氧→排 CO₂→半拉格朗日平流"整条链路——
+        //     早期若把 co2N 漏出 swap()，排放会被平流前的旧值覆盖，羽流永远为 0。
+        AtmosphereGrid co2Grid = new AtmosphereGrid(level);
+        co2Grid.ensureAround(at.x, at.z, wind, t0);
+        float co2Before = co2Grid.columnCo2(at.x, at.z);
+        // 初值按列状态分三档：开阔天空 400 ppm、密闭/地下 600 ppm、实心 800 ppm。
+        // 命令位置 y=-59 在地下，列多为密闭，不能写死 400 ppm——
+        // 这是被真实失败逼出来的边界：早期 <2e-4 的容差恰好把 600 ppm 误判成错误
+        // （0.0006f−0.0004f 的 float 实际值略大于 2e-4，正好卡在边界上）。
+        r.check(co2Before >= AtmosphereGrid.CO2_BACKGROUND * 0.95f
+                        && co2Before <= AtmosphereGrid.CO2_BACKGROUND * 2.05f,
+                String.format("CO₂ 初值为背景量级（%.0f ppm，预期 400~800）", co2Before * 1e6f));
+        for (int i = 1; i <= 40; i++) {
+            co2Grid.injectEmission(at.x, at.z, 1f);   // 满负荷耗氧机器持续排放
+            co2Grid.step(t0 + i * 3L, wind, 0f);
+        }
+        float co2After = co2Grid.columnCo2(at.x, at.z);
+        // 半拉格朗日平流会把源点排放迅速送走，所以源点本身只小幅上升（实测约 +30%），
+        // 羽流真正的证据是下风处浓度。早期写成 >3×背景是错的：那要求"原地堆积"，
+        // 与平流的设计目标正好相反。
+        r.check(co2After > co2Before * 1.1f,
+                String.format("排放源使 CO₂ 上升（%.0f → %.0f ppm）",
+                        co2Before * 1e6f, co2After * 1e6f));
+        r.check(co2After <= 0.1201f, String.format("CO₂ 有界 ≤ 12%%（%.0f ppm）", co2After * 1e6f));
+        // 下风方向（wind = (6,0,-3)，即 +x/-z）应也能测到高于背景的 CO₂。
+        // 密闭列无通风稀释，满负荷持续排放会累积到百分级；上界仍由 clampFields 钉死在 12%。
+        float co2Down = co2Grid.columnCo2(at.x + AtmosphereGrid.CELL * 2f,
+                at.z - AtmosphereGrid.CELL * 1f);
+        r.check(co2Down > co2Before * 2f && co2Down <= 0.1201f,
+                String.format("CO₂ 被风平流到下风处（%.0f ppm，应 >2×背景且 ≤12%%）",
+                        co2Down * 1e6f));
+
         // ---------------- 2) 全球模型 ----------------
         GlobalModel gm = new GlobalModel(level);
         gm.ensureAround(at.x, at.z, t0);
