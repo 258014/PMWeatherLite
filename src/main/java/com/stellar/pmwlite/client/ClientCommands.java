@@ -33,7 +33,8 @@ public final class ClientCommands {
                             .executes(ctx -> togglePost(ctx.getSource()))
                             .then(Commands.literal("on").executes(ctx -> setPost(ctx.getSource(), true)))
                             .then(Commands.literal("off").executes(ctx -> setPost(ctx.getSource(), false)))
-                            .then(Commands.literal("status").executes(ctx -> status(ctx.getSource()))))
+                            .then(Commands.literal("status").executes(ctx -> status(ctx.getSource())))
+                            .then(Commands.literal("light").executes(ctx -> light(ctx.getSource()))))
                     .then(Commands.literal("hud")
                             .executes(ctx -> toggleHud(ctx.getSource()))
                             .then(Commands.literal("on").executes(ctx -> setHud(ctx.getSource(), true)))
@@ -77,6 +78,14 @@ public final class ClientCommands {
                 + "\n§7后处理: " + PostEffectPipeline.status()
                 + "\n§7叠加层: " + (ClientVisualState.overlayEnabled() ? "§a开" : "§c关")
                 + "\n§7当前强度: §f" + Math.round(ClientVisualState.intensity() * 100f) + "%");
+        return 1;
+    }
+
+    /** 只读诊断：把光照快照打出来，方便对比"改参数前后"与排查色温不一致。 */
+    private static int light(CommandSourceStack src) {
+        reply(src, "§6[PMWLite] 光照状态 §8(每客户端 tick 更新)\n" + LightingState.describe()
+                + "\n§7后处理: " + PostEffectPipeline.status()
+                + " §8| §7pass 数: 2 (main→temp→main)");
         return 1;
     }
 

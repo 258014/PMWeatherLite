@@ -14,10 +14,14 @@ import net.minecraftforge.fml.common.Mod;
 /**
  * All client-side render/input hooks, on the Forge event bus.
  *
- * Order of a frame:
- *   ViewportEvent (fog)  ->  RenderLevelStageEvent.AFTER_LEVEL (post chain)  ->  RenderGuiEvent.Post (overlay)
- * which is exactly the order a post-processing stack composites in, and the reason each layer can
- * fall back independently.
+ * Order of a frame (v0.4 明确化):
+ *   ClientTick (LightingState + ClientVisualState)
+ *     -> ViewportEvent.RenderFog / ComputeFogColor (地形 shader 内的雾)
+ *     -> RenderLevelStageEvent.AFTER_LEVEL (post chain: haze main→temp, blit temp→main)
+ *     -> RenderGuiEvent.Post (2D 光照幕 / 雨幕 / 闪电 / HUD)
+ *
+ * 这就是后处理栈真正的合成顺序。三层都从同一份 LightingState / ClientVisualState 读数，
+ * 且各自独立回退：光影包接管后链时只跳过 pass，雾和 2D 合成仍然跟着光照走。
  */
 @Mod.EventBusSubscriber(modid = PMWLite.MOD_ID, value = Dist.CLIENT)
 public final class ClientEvents {
@@ -30,6 +34,8 @@ public final class ClientEvents {
 
         ShaderCompatLayer.tick();
         ClientVisualState.tick();
+        // 先算光照事实，再让同一帧的雾/pass/2D 合成共用它；不要在渲染回调里算。
+        LightingState.tick(0f);
 
         Minecraft mc = Minecraft.getInstance();
         while (ClientSetup.RADAR_KEY.consumeClick()) {

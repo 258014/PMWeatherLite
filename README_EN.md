@@ -151,6 +151,17 @@ layers and yields:
 All three are independent and individually switchable (`/pmwlite fx`, `/pmwlite hud`). Any
 layer that fails falls back to the next one — no black screen, no conflict.
 
+### Light / post-processing linkage (this change)
+
+A new `LightingState` snapshot is computed once per client tick: sun direction, intensity and
+colour temperature, ambient sky colour, and four shadow parameters (strength / softness /
+quantisation grid / offset). Fog, the post pass and the 2D compositing layer all read the same
+values. Stage order is fixed: **fog → airlight → shadow veil → storm haze → lightning → vignette
+→ copy-back → 2D overlay**; stages A–E share the one existing pass, so the **pass count stays 2**.
+With a shader pack active the 3D pass steps aside entirely, while the 2D light veil still follows
+the lighting snapshot. We never write shader-pack uniforms. `/pmwlite fx light` prints the state.
+See [09-光影与后处理联动](docs/09-光影与后处理联动.md).
+
 ### Atmosphere field: one parcel of air per cell (v0.3)
 
 In v0.1/v0.2 weather was an **entity** — a `Storm` object dragging a Rankine vortex around,
@@ -330,7 +341,9 @@ All design documents are currently in Chinese.
 | [04-优化评估报告-v2](docs/04-优化评估报告-v2.md) | First performance/stability review |
 | [05-音效与反馈-v3](docs/05-音效与反馈-v3.md) | Sound system and interaction feedback |
 | [06-算法与性能优化-v4](docs/06-算法与性能优化-v4.md) | Algorithm/allocation work, benchmarks, verification |
-| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | **This release**: module list, scope, acceptance criteria, measurements |
+| [07-v0.2 模块与验收](docs/07-v0.2-模块与验收.md) | Module list, scope, acceptance criteria, measurements |
+| [08-大气场-v3](docs/08-大气场-v3.md) | Three-layer field simulation: equations, wiring, switches, self-test |
+| [09-光影与后处理联动](docs/09-光影与后处理联动.md) | **This change**: stage order, light/shadow parameters, linkage and regression notes |
 
 ---
 

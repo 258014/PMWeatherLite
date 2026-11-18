@@ -33,12 +33,24 @@ public final class AtmosphereLayer {
         float scale = ClientVisualState.fogScale();
         if (scale >= 0.995f) return;
 
-        e.setFarPlaneDistance(Math.max(e.getFarPlaneDistance() * scale, 12f));
-        e.setNearPlaneDistance(Math.min(e.getNearPlaneDistance() * scale, 6f));
+        // v0.4: 阴影越强/太阳越低，空气越"稠"，可视距离再收一点。
+        // 幅度刻意很小（≤11%），远 plane 的 82% 缩减仍由风暴强度主导，
+        // 防止黄昏时把地图糊成一团。
+        float lightScale = 1f - LightingState.shadowStrength * 0.06f - LightingState.dusk * 0.05f;
+        lightScale = Mth.clamp(lightScale, 0.89f, 1f);
+
+        e.setFarPlaneDistance(Math.max(e.getFarPlaneDistance() * scale * lightScale, 12f));
+        e.setNearPlaneDistance(Math.min(e.getNearPlaneDistance() * scale * lightScale, 6f));
         e.setFogShape(FogShape.SPHERE);
     }
 
-    /** Tint the fog toward the slate grey of a heavy precipitation core. */
+    /**
+     * Tint the fog toward a precipitation core, **through the ambient sky colour**.
+     *
+     * 以前这里写死板岩灰，黄昏和正午的暴雨一个颜色。现在基色取
+     * {@link LightingState} 的同一份天空色：夜晚自然偏暗蓝、白天偏亮，
+     * 再按天气混合冷/暖核色。下游后处理读的是同一份快照，所以雾与 pass 不会互相打架。
+     */
     public static void applyFogColor(ViewportEvent.ComputeFogColor e) {
         if (!ShaderCompatLayer.fogEventsAllowed()) return;
         float i = ClientVisualState.intensity();
@@ -46,9 +58,15 @@ public final class AtmosphereLayer {
 
         float t = Mth.clamp((i - 0.30f) / 0.70f, 0f, 1f) * 0.55f;
         // cold biomes read blue-white (snow core), warm ones read green-grey (rain core)
-        float tr = ClientVisualState.cold() ? 0.72f : 0.40f;
-        float tg = ClientVisualState.cold() ? 0.76f : 0.45f;
-        float tb = ClientVisualState.cold() ? 0.82f : 0.53f;
+        float stormR = ClientVisualState.cold() ? 0.72f : 0.40f;
+        float stormG = ClientVisualState.cold() ? 0.76f : 0.45f;
+        float stormB = ClientVisualState.cold() ? 0.82f : 0.53f;
+
+        // 白昼天气核占主导，夜晚把天空色权重拉回来，避免"半夜发光的灰雾"
+        float coreWeight = Mth.lerp(LightingState.daylight, 0.35f, 0.80f);
+        float tr = Mth.lerp(coreWeight, LightingState.ambR * 0.85f, stormR);
+        float tg = Mth.lerp(coreWeight, LightingState.ambG * 0.85f, stormG);
+        float tb = Mth.lerp(coreWeight, LightingState.ambB * 0.85f, stormB);
 
         e.setRed(Mth.lerp(t, e.getRed(), tr));
         e.setGreen(Mth.lerp(t, e.getGreen(), tg));

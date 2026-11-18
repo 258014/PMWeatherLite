@@ -9,7 +9,18 @@
     { "name": "OutSize", "type": "float", "count": 2, "values": [ 854.0, 480.0 ] },
     { "name": "StormHaze", "type": "float", "count": 1, "values": [ 0.0 ] },
     { "name": "Cold", "type": "float", "count": 1, "values": [ 0.0 ] },
-    { "name": "Flash", "type": "float", "count": 1, "values": [ 0.0 ] }
+    { "name": "Flash", "type": "float", "count": 1, "values": [ 0.0 ] },
+    { "name": "SunScreen", "type": "float", "count": 3, "values": [ 0.0, 0.0, 1.0 ] },
+    { "name": "SunColor", "type": "float", "count": 3, "values": [ 1.0, 0.98, 0.92 ] },
+    { "name": "AmbientColor", "type": "float", "count": 3, "values": [ 0.6, 0.7, 0.9 ] },
+    { "name": "Sunlight", "type": "float", "count": 1, "values": [ 1.0 ] },
+    { "name": "Ambient", "type": "float", "count": 1, "values": [ 1.0 ] },
+    { "name": "ShadowStrength", "type": "float", "count": 1, "values": [ 0.4 ] },
+    { "name": "ShadowSoftness", "type": "float", "count": 1, "values": [ 0.12 ] },
+    { "name": "ShadowResolution", "type": "float", "count": 1, "values": [ 96.0 ] },
+    { "name": "ShadowOffset", "type": "float", "count": 2, "values": [ 0.0, 0.0 ] },
+    { "name": "Daylight", "type": "float", "count": 1, "values": [ 1.0 ] },
+    { "name": "Dusk", "type": "float", "count": 1, "values": [ 0.0 ] }
   ],
   "attributes": [
     { "name": "Position" }
