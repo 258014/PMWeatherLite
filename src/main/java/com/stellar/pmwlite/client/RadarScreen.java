@@ -320,6 +320,17 @@ public class RadarScreen extends Screen {
         row += 11;
         g.drawString(this.font, String.format("§7云底 §f%.0f §8m   §7图层 §f%d §8/8",
                 a.cloudBaseM(), ClientRadarCache.selectedLayer() + 1), x, row, 0xFFFFFF, false);
+        row += 11;
+        // 光学现象：与 HUD 同源（ClientVisualState），科学/艺术标记一目了然
+        int kind = ClientVisualState.opticsKind();
+        if (kind > 0 && kind < com.stellar.pmwlite.atmos.OpticalField.KIND_COUNT) {
+            var k = com.stellar.pmwlite.atmos.OpticalField.Kind.values()[kind];
+            String tag = ClientVisualState.opticsArtistic() ? "§d艺术化" : "§b科学";
+            g.drawString(this.font, String.format("§7光学 %s%s§7 · %ds",
+                    tag, k.label, ClientVisualState.opticsDuration()), x, row, 0xFFFFFF, false);
+        } else {
+            g.drawString(this.font, "§7光学 §8暂无可辨识现象", x, row, 0x888888, false);
+        }
     }
 
     private int kv(GuiGraphics g, int x, int y, String k, String v) {

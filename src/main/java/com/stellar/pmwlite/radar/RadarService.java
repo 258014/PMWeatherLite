@@ -108,9 +108,24 @@ public final class RadarService {
                 ? new com.stellar.pmwlite.network.AtmosProbePacket(true, probe.underground,
                 probe.pressureHpa, probe.tempC, probe.humidity, probe.oxygen,
                 probe.windSpeed, probe.apparentC, probe.dewPointC, probe.cloudBaseM,
-                probe.cloud, 0f, probe.co2)
+                probe.cloud, 0f, probe.co2,
+                probe.gases[com.stellar.pmwlite.atmos.GasField.SO2],
+                probe.gases[com.stellar.pmwlite.atmos.GasField.NO2],
+                probe.gases[com.stellar.pmwlite.atmos.GasField.CO],
+                probe.gases[com.stellar.pmwlite.atmos.GasField.PM])
                 : new com.stellar.pmwlite.network.AtmosProbePacket(false, false,
-                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
+                0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f, 0f);
         NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player), packet);
+    }
+
+    /** 1 Hz 光学现象状态推送（与探针同频，供 HUD 文案与屏幕叠加层共用）。 */
+    public static void sendOptics(ServerPlayer player) {
+        PMWLite mod = PMWLite.instance();
+        if (mod == null || !mod.config().opticsSystem) return;
+        ServerLevel level = player.serverLevel();
+        var manager = com.stellar.pmwlite.atmos.AtmosphereManager.of(level, mod.config());
+        var snap = manager.optics().snapshot();
+        NetworkHandler.CHANNEL.send(PacketDistributor.PLAYER.with(() -> player),
+                com.stellar.pmwlite.network.AtmosOpticsPacket.from(snap));
     }
 }

@@ -51,6 +51,7 @@ public final class AtmosphereManager {
     private final ServerConfig cfg;
     private final AtmosphereGrid grid;
     private final GlobalModel global;
+    private final OpticalTracker optics = new OpticalTracker();
     private final AtmosphereGrid.Probe sharedProbe = new AtmosphereGrid.Probe();
     /** 全球近地面风采样容器（复用，避免每步分配）。 */
     private final float[] surfaceWindBuf = new float[2];
@@ -65,6 +66,8 @@ public final class AtmosphereManager {
         this.cfg = cfg;
         this.grid = new AtmosphereGrid(level);
         this.grid.configure(cfg.co2System, cfg.machineEmissions);
+        this.grid.configureGases(cfg.gasField && cfg.co2System);
+        this.optics.setEnabled(cfg.opticsSystem);
         this.global = new GlobalModel(level);
     }
 
@@ -160,7 +163,30 @@ public final class AtmosphereManager {
             global.ensureAround(cx, cz, gameTime);
             global.step(gameTime, storms.getStorms());
         }
-        if (tick % 20 == 0) effectTick();
+        if (tick % 20 == 0) {
+            effectTick();
+            updateOptics(storms, gameTime, cx, cz);
+        }
+    }
+
+    /** 光学状态：用玩家重心处的探针代表"这片天空"，1 Hz 更新一次状态机。 */
+    private void updateOptics(StormManager storms, long gameTime, double cx, double cz) {
+        if (!cfg.opticsSystem || !grid.ready() || level.players().isEmpty()) return;
+        var probe = new AtmosphereGrid.Probe();
+        if (!grid.probe(cx, Math.max(level.getSeaLevel() + 64, 96), cz, probe)) return;
+        OpticalTracker.StormLike view = () -> {
+            int n = 0;
+            for (var s : storms.getStorms()) {
+                if (s.stage >= 2) n++;
+            }
+            return n;
+        };
+        optics.tick(level, grid, new Vec3(cx, 0, cz), probe, view, gameTime);
+    }
+
+    /** 供发包读取当前光学状态。 */
+    public OpticalTracker optics() {
+        return optics;
     }
 
     /** 低氧后果：先给挖掘疲劳，再给缓慢伤害。数值只做提示，不做惩罚性秒杀。 */

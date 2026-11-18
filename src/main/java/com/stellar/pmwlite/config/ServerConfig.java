@@ -59,6 +59,14 @@ public final class ServerConfig {
     /** CO₂ 健康后果：高浓度给缺氧/反胃等效果（复用原版 effect，供 PoT 等 mod 兼容）。 */
     public boolean co2HealthEffects = true;
 
+    // ---------------- v0.3.3 多气体 + 环境光学 ----------------
+    /** 多气体列场（SO₂/NO₂/CO/PM）总开关；关闭后只有 CO₂，行为与 0.3.2 一致。 */
+    public boolean gasField = true;
+    /** 环境光学现象求解与显示总开关（幻日/日晕/雾虹/霞光/极光样光幕）。 */
+    public boolean opticsSystem = true;
+    /** 是否渲染光学现象的屏幕叠加层；关掉只保留 HUD 文字读数。 */
+    public boolean opticsOverlay = true;
+
     /**
      * Per-block wind speed threshold at which the block is ripped up.
      * Ported from source blockStrengths defaults (leaves 50-65, wool 60, etc.).

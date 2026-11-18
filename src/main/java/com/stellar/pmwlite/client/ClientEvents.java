@@ -64,6 +64,9 @@ public final class ClientEvents {
     @SubscribeEvent
     public static void onRenderGui(RenderGuiEvent.Post event) {
         StormOverlayLayer.render(event.getGuiGraphics(), event.getPartialTick());
+        // 光学现象独立于风暴强度：晴天也可能有幻日/极光，所以单独调用，
+        // 且在 StormOverlayLayer 之后画，让光幕叠在风暴暗角之上。
+        OpticsOverlayLayer.render(event.getGuiGraphics(), event.getPartialTick());
     }
 
     @SubscribeEvent

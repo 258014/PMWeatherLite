@@ -209,6 +209,94 @@ public final class AtmosphereSelfTest {
                 String.format("CO₂ 被风平流到下风处（%.0f ppm，应 >2×背景且 ≤12%%）",
                         co2Down * 1e6f));
 
+        // 1d) 多气体列场：背景初值、注入上升、有界、平流到下风。
+        //     列场是二维的（地表边界层），用 inject 注入后应沿同一条风路走。
+        AtmosphereGrid gasGrid = new AtmosphereGrid(level);
+        gasGrid.ensureAround(at.x, at.z, wind, t0);
+        float so2Bg = gasGrid.gases().at(at.x, at.z, GasField.SO2);
+        float pmBg = gasGrid.gases().at(at.x, at.z, GasField.PM);
+        r.check(so2Bg >= GasField.BACKGROUND[GasField.SO2] * 0.999f
+                        && so2Bg <= GasField.BACKGROUND[GasField.SO2] * 1.2f,
+                String.format("SO₂ 初值为背景量级（%.1f ppb）", so2Bg * 1e9f));
+        for (int i = 1; i <= 40; i++) {
+            gasGrid.injectGas(at.x, at.z, "so2", 1f);
+            gasGrid.injectGas(at.x, at.z, "pm", 1f);
+            gasGrid.step(t0 + i * 3L, wind, 0f);
+        }
+        // 半拉格朗日平流会把源点浓度立刻送走，所以源点本身可能已回到背景；
+        // 羽流的证据是"下风处浓度高于背景"，这与 CO₂ 段是同一个物理事实。
+        float so2Down = gasGrid.gases().at(at.x + AtmosphereGrid.CELL, at.z, GasField.SO2);
+        float pmDown = gasGrid.gases().at(at.x + AtmosphereGrid.CELL, at.z, GasField.PM);
+        r.check(so2Down > so2Bg * 3f && so2Down <= GasField.MAX[GasField.SO2] * 1.001f,
+                String.format("SO₂ 注入后成羽流且有界（背景 %.0f → 下风 %.0f ppb）",
+                        so2Bg * 1e9f, so2Down * 1e9f));
+        // 整场最大值判据：PM 单点下风值可能被平流摊薄到 0，用全场峰值更稳健，
+        // 也能防止"只是把源点搬走、总量没增加"的假象。
+        float so2Max = 0f, pmMax = 0f;
+        for (int col = 0; col < AtmosphereGrid.SX * AtmosphereGrid.SZ; col++) {
+            so2Max = Math.max(so2Max, gasGrid.gases().column(GasField.SO2, col));
+            pmMax = Math.max(pmMax, gasGrid.gases().column(GasField.PM, col));
+        }
+        r.check(so2Max > so2Bg * 3f,
+                String.format("SO₂ 全场峰值上升（%.0f ppb）", so2Max * 1e9f));
+        r.check(pmMax > 0.05f && pmMax <= 1.001f,
+                String.format("PM 全场峰值上升且有界（浑浊度 %.2f，下风点 %.2f）", pmMax, pmDown));
+
+        // 1e) 光学求解器：科学可解释 vs 艺术化夸张的判定必须正确。
+        //     这是"参数组合→现象"的纯函数，直接构造输入验证物理方向。
+        var oi = new OpticalField.Input();
+        oi.tempC = -12f; oi.humidity = 0.62f; oi.dewPointC = -18f;
+        oi.cloud = 0.45f; oi.cloudBaseM = 6000f; oi.pm = 0.02f;
+        // 低太阳角（日出后）+ 冰晶 + 薄云 → 幻日
+        oi.sunAltitudeDeg = OpticalField.sunAltitude(6000L + 3600L - 900L); // ≈15°
+        var lowSunResult = OpticalField.solve(oi, null);
+        float phLow = lowSunResult.strength[OpticalField.Kind.PARHELION.ordinal()];
+        // 正午高太阳角 → 幻日应显著减弱（现实中 >60° 消失）
+        oi.sunAltitudeDeg = 85f;
+        var highSunResult = OpticalField.solve(oi, null);
+        float phHigh = highSunResult.strength[OpticalField.Kind.PARHELION.ordinal()];
+        r.check(phLow > 0.2f && phLow > phHigh * 2f,
+                String.format("幻日随太阳高度角降低而增强（15° %.2f vs 85° %.2f）", phLow, phHigh));
+        r.check(OpticalField.Kind.PARHELION.scientific,
+                "幻日标记为科学可解释");
+        r.check(!OpticalField.Kind.AURORA.scientific,
+                "极光样光幕标记为艺术化（不冒充科学）");
+
+        // 极光：夜间 + 高磁纬 + 高 Kp + 通透 → 强；白天/低纬 → 弱
+        var ai = new OpticalField.Input();
+        ai.sunAltitudeDeg = -40f; ai.geomagneticLat = 70f; ai.kp = 8f;
+        ai.cloud = 0.2f; ai.pm = 0.05f; ai.tempC = -20f; ai.dewPointC = -25f;
+        var auroraNight = OpticalField.solve(ai, null);
+        float auNight = auroraNight.strength[OpticalField.Kind.AURORA.ordinal()];
+        ai.sunAltitudeDeg = 30f; ai.geomagneticLat = 10f; ai.kp = 1f;
+        var auroraDay = OpticalField.solve(ai, null);
+        float auDay = auroraDay.strength[OpticalField.Kind.AURORA.ordinal()];
+        r.check(auNight > 0.3f && auNight > auDay * 5f,
+                String.format("极光需夜+高纬+磁扰（夜 %.2f vs 昼 %.2f）", auNight, auDay));
+        r.check(auroraNight.artistic && auroraNight.dominant == OpticalField.Kind.AURORA,
+                "极光场景主导现象为艺术化光幕");
+
+        // 霞光：低太阳角 + 气溶胶 → 触发；所有强度有界且有限
+        var si = new OpticalField.Input();
+        si.sunAltitudeDeg = 2f; si.pm = 0.7f; si.so2 = 3e-4f; si.no2 = 1e-4f;
+        si.cloud = 0.3f;
+        var glow = OpticalField.solve(si, null);
+        float ag = glow.strength[OpticalField.Kind.AFTERGLOW.ordinal()];
+        r.check(ag > 0.2f, String.format("污染霞光在低角度+气溶胶下触发（%.2f）", ag));
+        boolean bounded = true;
+        for (int i = 0; i < OpticalField.KIND_COUNT; i++) {
+            float v = glow.strength[i];
+            if (!Float.isFinite(v) || v < 0f || v > 1f) bounded = false;
+        }
+        r.check(bounded, "光学强度全部有限且在 0..1");
+
+        // 地下不应看到任何天空光学现象
+        var ui = new OpticalField.Input();
+        ui.underground = true;
+        var underground = OpticalField.solve(ui, null);
+        r.check(underground.dominant == OpticalField.Kind.NONE,
+                "地下不触发任何天空光学现象");
+
         // ---------------- 2) 全球模型 ----------------
         GlobalModel gm = new GlobalModel(level);
         gm.ensureAround(at.x, at.z, t0);

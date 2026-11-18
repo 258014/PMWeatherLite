@@ -1,6 +1,7 @@
 package com.stellar.pmwlite.client;
 
 import com.stellar.pmwlite.network.AtmosLayerPacket;
+import com.stellar.pmwlite.network.AtmosOpticsPacket;
 import com.stellar.pmwlite.network.AtmosProbePacket;
 import com.stellar.pmwlite.network.NetworkHandler;
 import com.stellar.pmwlite.network.RadarRequestPacket;
@@ -44,7 +45,16 @@ public final class ClientRadarCache {
     public static void acceptProbe(AtmosProbePacket msg) {
         probe = msg;
         probeAt = Util.getMillis();
-        if (msg.valid()) ClientVisualState.setCo2(msg.co2());
+        if (msg.valid()) {
+            ClientVisualState.setCo2(msg.co2());
+            ClientVisualState.setGases(msg.so2(), msg.no2(), msg.co(), msg.pm());
+        }
+    }
+
+    /** 光学状态包：写到客户端视觉状态，渲染层与 HUD 共用同一份。 */
+    public static void acceptOptics(AtmosOpticsPacket msg) {
+        ClientVisualState.setOptics(msg.kind(), msg.artistic(), msg.durationSec(),
+                msg.parhelion(), msg.halo(), msg.fogbow(), msg.afterglow(), msg.aurora());
     }
 
     public static RadarSyncPacket snapshot() {

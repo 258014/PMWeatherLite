@@ -10,7 +10,7 @@ import java.util.function.Supplier;
 /**
  * 玩家所在位置的大气探针 / Local atmosphere probe.
  *
- * 1 Hz 广播，44 字节。HUD 与雷达信息栏都读它——这样客户端不需要自己算热力学，
+ * 1 Hz 广播。HUD 与雷达信息栏都读它——这样客户端不需要自己算热力学，
  * 也保证"屏幕上的数字"和"服务端判定低氧用的数字"是同一份，不会出现显示与判定不一致。
  *
  * {@code valid=false} 表示网格还没建立（刚进服/刚跨维度），客户端应显示"初始化中"。
@@ -19,7 +19,8 @@ public record AtmosProbePacket(
         boolean valid, boolean underground,
         float pressureHpa, float tempC, float humidity, float oxygen,
         float windSpeed, float apparentC, float dewPointC, float cloudBaseM,
-        float cloud, float groundT, float co2) {
+        float cloud, float groundT, float co2,
+        float so2, float no2, float co, float pm) {
 
     public void encode(FriendlyByteBuf buf) {
         buf.writeBoolean(valid);
@@ -35,13 +36,18 @@ public record AtmosProbePacket(
         buf.writeFloat(cloud);
         buf.writeFloat(groundT);
         buf.writeFloat(co2);
+        buf.writeFloat(so2);
+        buf.writeFloat(no2);
+        buf.writeFloat(co);
+        buf.writeFloat(pm);
     }
 
     public static AtmosProbePacket decode(FriendlyByteBuf buf) {
         return new AtmosProbePacket(buf.readBoolean(), buf.readBoolean(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
                 buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat(),
-                buf.readFloat(), buf.readFloat(), buf.readFloat());
+                buf.readFloat(), buf.readFloat(), buf.readFloat(),
+                buf.readFloat(), buf.readFloat(), buf.readFloat(), buf.readFloat());
     }
 
     public static void handle(AtmosProbePacket msg, Supplier<NetworkEvent.Context> ctx) {

@@ -98,10 +98,22 @@ public final class AtmosphereGrid {
     /** CO₂ 子系统开关（由调度器按配置设置；默认开，自检无需配置也能测）。 */
     private boolean co2Enabled = true;
     private boolean machineEmissions = true;
+    /** 多气体列场（SO₂/NO₂/CO/PM），与本地体场共享风与地表高度。 */
+    private final GasField gases;
 
     public void configure(boolean co2Enabled, boolean machineEmissions) {
         this.co2Enabled = co2Enabled;
         this.machineEmissions = machineEmissions;
+    }
+
+    /** 光学/多气体子系统开关透传。 */
+    public void configureGases(boolean gasEnabled) {
+        gases.configure(gasEnabled);
+    }
+
+    /** 供光学求解器/兼容层访问多气体列场。 */
+    public GasField gases() {
+        return gases;
     }
 
     /** 复用的查询结果，避免每次采样都 new。 */
@@ -111,6 +123,8 @@ public final class AtmosphereGrid {
         public float oxygen;
         /** CO₂ 体积分数（ppm 需 ×1e6）。背景 4e-4，污染羽流可到 1e-2 以上。 */
         public float co2;
+        /** 其他机器废气：下标同 GasField（SO2/NO2/CO/PM）。PM 为 0..1 浑浊度。 */
+        public final float[] gases = new float[GasField.COUNT];
         public float cloud;
         public float windX, windY, windZ, windSpeed;
         public float dewPointC, apparentC, cloudBaseM;
@@ -122,6 +136,7 @@ public final class AtmosphereGrid {
             humidity = 0.5f;
             oxygen = 0.2095f;
             co2 = CO2_BACKGROUND;
+            for (int g = 0; g < GasField.COUNT; g++) gases[g] = GasField.BACKGROUND[g];
             cloud = 0f;
             windX = windY = windZ = windSpeed = 0f;
             dewPointC = 0f;
@@ -136,6 +151,7 @@ public final class AtmosphereGrid {
         this.baseY = level.getMinBuildHeight();
         this.originX = Integer.MIN_VALUE;
         this.originZ = Integer.MIN_VALUE;
+        this.gases = new GasField(level, this);
     }
 
     public boolean ready() {
@@ -229,6 +245,8 @@ public final class AtmosphereGrid {
             co2N[i] = co2[i];
             phi[i] = 0f;
         }
+        // 网格搬家后列与坐标的对应关系全变了，气体场必须跟着重建，否则羽流会"跟错地方"
+        gases.reset();
         ready = true;
         lastStepTick = gameTime;
         steps = 0;
@@ -307,6 +325,8 @@ public final class AtmosphereGrid {
         project();
         relaxMoisture(dt, rainLevel);
         clampFields();
+        // 多气体列场在体场之后推进：此时风场已投影完成，羽流沿同一条风路走
+        gases.step(gameTime);
     }
 
     /** 滚动刷新火源列：每步只看 32 列，8 步扫完一遍。 */
@@ -721,6 +741,10 @@ public final class AtmosphereGrid {
         out.oxygen = sample(o2, gx, gy, gz, 0.2095f)
                 * Mth.clamp(out.pressureHpa / 1013.25f, 0f, 1f);
         out.co2 = sample(co2, gx, gy, gz, CO2_BACKGROUND);
+        // 多气体列场按世界坐标取列值（边界层浓度与高度无关）
+        for (int g = 0; g < GasField.COUNT; g++) {
+            out.gases[g] = gases.at(wx, wz, g);
+        }
         out.cloud = sample(cloud, gx, gy, gz, 0f);
         out.windX = sample(u, gx, gy, gz, 0f);
         out.windY = sample(w, gx, gy, gz, 0f);
@@ -752,6 +776,14 @@ public final class AtmosphereGrid {
         int z = Mth.clamp((int) ((wz - originZ) / CELL), 0, SZ - 1);
         int col = z * SX + x;
         emission[col] = Math.max(emission[col], Mth.clamp(strength, 0f, 1f));
+    }
+
+    /**
+     * 兼容层入口：在世界坐标注入一种非 CO₂ 气体（KubeJS / 其他 mod 调用）。
+     * key 见 {@link GasField#KEYS}（so2/no2/co/pm），strength 0..1。
+     */
+    public void injectGas(double wx, double wz, String key, float strength) {
+        gases.inject(wx, wz, key, strength);
     }
 
     /** 指定列的地面温度（供"海陆风"与 HUD 使用）。 */

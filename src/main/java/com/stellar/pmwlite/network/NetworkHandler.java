@@ -17,7 +17,7 @@ public final class NetworkHandler {
      * v0.3 新增了图层收/发两个包，协议号必须跟着升，否则 v0.2 客户端会用错位的解码器
      * 去读 v0.3 的数据包。宁可让版本不匹配的客户端连不上，也不要静默串包。
      */
-    private static final String PROTOCOL = "3";
+    private static final String PROTOCOL = "4";
 
     public static final SimpleChannel CHANNEL = NetworkRegistry.ChannelBuilder
             .named(new ResourceLocation(PMWLite.MOD_ID, "main"))
@@ -58,6 +58,12 @@ public final class NetworkHandler {
                 .encoder(AtmosProbePacket::encode)
                 .decoder(AtmosProbePacket::decode)
                 .consumerMainThread(AtmosProbePacket::handle)
+                .add();
+
+        CHANNEL.messageBuilder(AtmosOpticsPacket.class, id++, NetworkDirection.PLAY_TO_CLIENT)
+                .encoder(AtmosOpticsPacket::encode)
+                .decoder(AtmosOpticsPacket::decode)
+                .consumerMainThread(AtmosOpticsPacket::handle)
                 .add();
     }
 }

@@ -24,6 +24,13 @@ public final class ClientVisualState {
     private static boolean cold = false;
     /** 本地 CO₂ 体积分数（由 1 Hz 探针包写入，供雾色/能见度染色）。 */
     private static volatile float co2 = 0.0004f;
+    /** 其他机器废气（SO2/NO2/CO/PM），网络线程写、渲染线程读。 */
+    private static volatile float so2 = 5e-7f, no2 = 2e-8f, co = 1e-4f, pm = 0f;
+    /** 当前主导光学现象（ordinal 对应 OpticalField.Kind）。 */
+    private static volatile int opticsKind = 0;
+    private static volatile boolean opticsArtistic = false;
+    private static volatile int opticsDuration = 0;
+    private static volatile float parhelion = 0f, halo = 0f, fogbow = 0f, afterglow = 0f, aurora = 0f;
     private static float flash = 0f;
     private static int flashTimer = 0;
     private static int probeTimer = 0;
@@ -91,10 +98,37 @@ public final class ClientVisualState {
         co2 = value;
     }
 
-    /** 0..1 污染浑浊度：CO₂ 超过 1% 起逐渐明显，5% 封顶。 */
+    /** 0..1 污染浑浊度：CO₂ 超过 1% 起逐渐明显，5% 封顶；PM 也计入（取较大者）。 */
     public static float pollution() {
-        return Mth.clamp((co2 - 0.01f) / 0.04f, 0f, 1f);
+        float byCo2 = Mth.clamp((co2 - 0.01f) / 0.04f, 0f, 1f);
+        return Math.max(byCo2, Mth.clamp(pm, 0f, 1f) * 0.8f);
     }
+
+    // ---- 多气体读数 ----
+    public static void setGases(float s, float n, float c, float p) {
+        so2 = s; no2 = n; co = c; pm = p;
+    }
+    public static float so2() { return so2; }
+    public static float no2() { return no2; }
+    public static float co() { return co; }
+    public static float pm() { return pm; }
+
+    // ---- 光学现象状态 ----
+    public static void setOptics(int kind, boolean artistic, int duration,
+                                 float ph, float ha, float fb, float ag, float au) {
+        opticsKind = kind;
+        opticsArtistic = artistic;
+        opticsDuration = duration;
+        parhelion = ph; halo = ha; fogbow = fb; afterglow = ag; aurora = au;
+    }
+    public static int opticsKind() { return opticsKind; }
+    public static boolean opticsArtistic() { return opticsArtistic; }
+    public static int opticsDuration() { return opticsDuration; }
+    public static float parhelion() { return parhelion; }
+    public static float halo() { return halo; }
+    public static float fogbow() { return fogbow; }
+    public static float afterglow() { return afterglow; }
+    public static float aurora() { return aurora; }
 
     /** 0..1 flash brightness of the current lightning blink. */
     public static float flash() {

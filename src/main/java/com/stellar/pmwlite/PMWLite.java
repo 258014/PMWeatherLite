@@ -153,6 +153,7 @@ public class PMWLite {
             for (ServerLevel level : server.getAllLevels()) {
                 for (ServerPlayer player : level.players()) {
                     RadarService.sendProbe(player);
+                    RadarService.sendOptics(player);
                 }
             }
         }
